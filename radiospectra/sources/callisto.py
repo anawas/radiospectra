@@ -277,6 +277,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         axes = fl[1]
         header = fl[0].header
 
+        #simple patch for time_End issue
+        if header['TIME-END'][6:] == '60':
+            header['TIME-END'] = (header['TIME-END'][:6] + '59', header.comments['TIME-END'] + ' [modified]')
+        elif header['TIME-END'][:2] == '24':
+            header['TIME-END'] = ('00' + header['TIME-END'][2:], header.comments['TIME-END'] + ' [modified]')
+        
         start = _parse_header_time(
             header['DATE-OBS'], header.get('TIME-OBS', header.get('TIME$_OBS'))
         )
