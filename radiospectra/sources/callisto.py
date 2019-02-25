@@ -7,6 +7,7 @@ from collections import defaultdict
 
 import numpy as np
 from astropy.io import fits
+from astropy.nddata.ccddata import CCDData
 from bs4 import BeautifulSoup
 from scipy.optimize import leastsq
 from scipy.ndimage import gaussian_filter1d
@@ -18,7 +19,7 @@ from sunpy.util.net import download_file
 from sunpy.extern.six.moves import urllib
 from sunpy.extern.six import next, itervalues
 
-from ..spectrogram import LinearTimeSpectrogram, REFERENCE
+from ..spectrogram import LinearTimeSpectrogram, REFERENCE, _union
 
 __all__ = ['CallistoSpectrogram']
 
@@ -157,19 +158,40 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             path to save the spectrogram to
         """
         main_header = self.get_header()
-        data = fits.PrimaryHDU(self, header=main_header)
+        data = CCDData(data=self.data, header=main_header, unit='Sun')
         # XXX: Update axes header.
 
+        data.header.append(card=('BZERO',0, 'scaling offset'))
+        data.header.append(card=('BSCALE',1, 'scaling factor'))
+        data.header['NAXIS1'] = (data.header['NAXIS1'], 'length of data axis 1')
+        data.header['NAXIS2'] = (data.header['NAXIS2'], 'length of data axis 2')
+
         freq_col = fits.Column(
-            name="frequency", format="D8.3", array=self.freq_axis
+            name="FREQUENCY",
+            format=f"{len(self.freq_axis)}D8.3",
+            array=np.reshape(np.array(self.freq_axis), (1, len(self.freq_axis)))
         )
         time_col = fits.Column(
-            name="time", format="D8.3", array=self.time_axis
+            name="TIME",
+            format=f"{len(self.time_axis)}D8.3",
+            array=np.reshape(np.array(self.time_axis), (1, len(self.time_axis)))
         )
-        cols = fits.ColDefs([freq_col, time_col])
-        table = fits.new_table(cols, header=self.axes_header)
 
-        hdulist = fits.HDUList([data, table])
+        cols = fits.ColDefs([time_col, freq_col])
+        table = fits.BinTableHDU.from_columns(cols, header=self.axes_header, name='AXES')
+
+        table.header['TTYPE1'] = (table.header['TTYPE1'], 'label for field   1')
+        table.header['TFORM1'] = (table.header['TFORM1'], 'data format of field: 8-byte DOUBLE')
+        table.header['TTYPE2'] = (table.header['TTYPE2'], 'label for field   2')
+        table.header['TFORM2'] = (table.header['TFORM2'], 'data format of field: 8-byte DOUBLE')
+        
+        table.header['TSCAL1'] = 1
+        table.header['TZERO1'] = 0
+        table.header['TSCAL2'] = 1
+        table.header['TZERO2'] = 0  
+
+        hdulist = data.to_hdu()
+        hdulist.insert(1,table)
         hdulist.writeto(filepath)
 
     def get_header(self):
@@ -185,6 +207,61 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         return header
 
     @classmethod
+    def join_many(cls, specs, mk_arr=None, nonlinear=False,
+                  maxgap=0, fill=None):
+        """Produce new Spectrogram that contains spectrograms
+        joined together in time.
+
+        Parameters
+        ----------
+        specs : list
+            List of spectrograms to join together in time.
+        nonlinear : bool
+            If True, leave out gaps between spectrograms. Else, fill them with
+            the value specified in fill.
+        maxgap : float, int or None
+            Largest gap to allow in second. If None, allow gap of arbitrary
+            size.
+        fill : float or int
+            Value to fill missing values (assuming nonlinear=False) with.
+            Can be LinearTimeSpectrogram.JOIN_REPEAT to repeat the values for
+            the time just before the gap.
+        mk_array: function
+            Function that is called to create the resulting array. Can be set
+            to LinearTimeSpectrogram.memap(filename) to create a memory mapped
+            result array.
+        """
+
+        new_header = specs[0].get_header()
+        new_axes_header = specs[0].axes_header
+
+        data = super(CallistoSpectrogram, cls).join_many(specs, mk_arr, nonlinear, maxgap, fill)
+
+        params = {
+            'time_axis': data.time_axis,
+            'freq_axis': data.freq_axis,
+            'start': data.start,
+            'end': specs[-1].end,
+            't_delt': data.t_delt,
+            't_init': data.t_init,
+            't_label': data.t_label,
+            'f_label': data.f_label,
+            'content': data.content,
+            'instruments': _union(spec.instruments for spec in specs),
+        }
+
+        new_header['DATE-END'] = max([x.get_header()['DATE-END'] for x in specs])
+        new_header['TIME-END'] = max([x.get_header()['TIME-END'] for x in specs])
+        new_header['DATAMIN'] = min([x.get_header()['DATAMIN'] for x in specs])
+        new_header['DATAMAX'] = max([x.get_header()['DATAMAX'] for x in specs])
+        
+        new_axes_header['NAXIS1'] = int(new_axes_header['BITPIX']) * (len(data.time_axis) + len(data.freq_axis))
+        new_axes_header['TFORM1'] = str(len(data.time_axis)) + "D8.3"
+        new_axes_header['TFORM2'] = str(len(data.freq_axis)) + "D8.3"
+
+        return CallistoSpectrogram(data.data, header=new_header, axes_header=new_axes_header, **params)
+
+    @classmethod
     def read(cls, filename, **kwargs):
         """Reads in FITS file and return a new CallistoSpectrogram.
         Any unknown (i.e. any except filename) keyword arguments get
@@ -196,7 +273,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             path of the file to read
         """
         fl = fits.open(filename, **kwargs)
-        data = fl[0].data
+        data = np.ma.array(fl[0].data, mask=fl['MASK'].data) if 'MASK' in fl else fl[0].data
         axes = fl[1]
         header = fl[0].header
 
@@ -233,11 +310,11 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         if axes is not None:
             try:
                 # It's not my fault. Neither supports __contains__ nor .get
-                tm = axes.data['time']
+                tm = axes.data['TIME']
             except KeyError:
                 tm = None
             try:
-                fq = axes.data['frequency']
+                fq = axes.data['FREQUENCY']
             except KeyError:
                 fq = None
 
