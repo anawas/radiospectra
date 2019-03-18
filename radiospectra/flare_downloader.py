@@ -232,7 +232,6 @@ def Callisto_dir_flare(row_num, dataframe, show_details=False, show_urls=False):
 def e_Callisto_exceptionSeeker(row_num, dataframe, new_frame, exceptions_fr, folder, sort=False):
     """
     Returns new_frame and exceptions_fr also download the files of the new frame
-
     """
     try:
 
@@ -269,7 +268,6 @@ def e_Callisto_exceptionSeeker(row_num, dataframe, new_frame, exceptions_fr, fol
 def remarks_Cleaners(row_num, dataframe, new_frame, exceptions_fr):
     """
     Cleans remarks column from an already downloaded dataframe
-
     """
     row = dataframe.loc[row_num]
     directions = row['remarks']
@@ -288,6 +286,7 @@ def iter_remarks_Cleaners(data):
     for index, row in data.iterrows():
         clean_directions, exceptions_frame = remarks_Cleaners(index, data, clean_directions, exceptions_frame)
     return clean_directions, exceptions_frame
+
 
 #Main Method
 def e_Callisto_burst_downloader(data, sort=False, folder="e-Callisto_Flares", exist=False):
