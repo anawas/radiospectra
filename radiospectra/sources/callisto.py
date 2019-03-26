@@ -492,9 +492,11 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         urls = query(start, end, [instrument])
         specs = list(map(cls.from_url, urls))
 
-        new_header = specs[0].get_header()
-
-        new_axes_header = specs[0].axes_header
+        try:
+            new_header = specs[0].get_header()
+            new_axes_header = specs[0].axes_header
+        except IndexError:
+            raise IndexError("No data found")
 
         freq_buckets = defaultdict(list)
         for elem in specs:
