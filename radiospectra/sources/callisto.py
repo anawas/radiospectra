@@ -209,9 +209,10 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
     @classmethod
     def join_many(cls, specs, mk_arr=None, nonlinear=False,
-                  maxgap=0, fill=None):
+                  maxgap=None, fill=LinearTimeSpectrogram.JOIN_REPEAT):
         """Produce new Spectrogram that contains spectrograms
         joined together in time.
+        Using linearSpectrogram.JOINREPEAT as default to fill the gaps
 
         Parameters
         ----------
@@ -235,8 +236,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
         new_header = specs[0].get_header()
         new_axes_header = specs[0].axes_header
+        freq_buckets = defaultdict(list)
 
-        data = super(CallistoSpectrogram, cls).join_many(specs, mk_arr, nonlinear, maxgap, fill)
+        for elem in specs:
+            freq_buckets[tuple(elem.freq_axis)].append(elem)
+
+        data = cls.combine_frequencies([super(CallistoSpectrogram, cls).join_many(elem,  mk_arr, nonlinear, maxgap, fill) for elem in itervalues(freq_buckets)])
 
         params = {
             'time_axis': data.time_axis,
@@ -485,16 +490,41 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         start = parse_time(start)
         end = parse_time(end)
         urls = query(start, end, [instrument])
-        data = list(map(cls.from_url, urls))
+        specs = list(map(cls.from_url, urls))
+
+        new_header = specs[0].get_header()
+
+        new_axes_header = specs[0].axes_header
+
         freq_buckets = defaultdict(list)
-        for elem in data:
+        for elem in specs:
             freq_buckets[tuple(elem.freq_axis)].append(elem)
-        try:
-            return cls.combine_frequencies(
-                [cls.join_many(elem, **kw) for elem in itervalues(freq_buckets)]
-            )
-        except ValueError:
-            raise ValueError("No data found.")
+
+        data = cls.combine_frequencies([cls.join_many(elem, **kw) for elem in itervalues(freq_buckets)])
+
+        params = {
+            'time_axis': data.time_axis,
+            'freq_axis': data.freq_axis,
+            'start': data.start,
+            'end': specs[-1].end,
+            't_delt': data.t_delt,
+            't_init': data.t_init,
+            't_label': data.t_label,
+            'f_label': data.f_label,
+            'content': data.content,
+            'instruments': _union(spec.instruments for spec in specs),
+        }
+
+        new_header['DATE-END'] = max([x.get_header()['DATE-END'] for x in specs])
+        new_header['TIME-END'] = max([x.get_header()['TIME-END'] for x in specs])
+        new_header['DATAMIN'] = min([x.get_header()['DATAMIN'] for x in specs])
+        new_header['DATAMAX'] = max([x.get_header()['DATAMAX'] for x in specs])
+
+        new_axes_header['NAXIS1'] = int(new_axes_header['BITPIX']) * (len(data.time_axis) + len(data.freq_axis))
+        new_axes_header['TFORM1'] = str(len(data.time_axis)) + "D8.3"
+        new_axes_header['TFORM2'] = str(len(data.freq_axis)) + "D8.3"
+
+        return CallistoSpectrogram(data.data, header=new_header, axes_header=new_axes_header, **params)
 
     def _overlap(self, other):
         """ Find frequency and time overlap of two spectrograms. """
