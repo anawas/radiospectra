@@ -315,3 +315,52 @@ def e_Callisto_burst_downloader(data, sort=False, folder="e-Callisto_Flares", ex
     exceptions_frame.append(rexcept_test)
     return rclean_test, exceptions_frame
 
+
+#Joining methods
+def e_Callisto_Burst_simplifier(dataframe, folder, sort=False):
+    """
+    Returns a new data frame with the direction of the joined data set
+    """
+    os.makedirs('./{}'.format(folder))
+    joined = pd.DataFrame(columns=dataframe.columns)
+
+    for index, elem in dataframe.iterrows():
+
+        directions = dir_Gen(index, dataframe)
+        name = os.path.basename(directions[0])
+
+        bursts_here = CallistoSpectrogram.from_files(directions)
+
+        row = dataframe.loc[index]
+
+        if sort == True:
+            flareType = row['class']
+            subtype = row['sub']
+            directory = directorySubtypeGenerator(folder, flareType, subtype)
+        else:
+            flareType = row['class']
+            directory = directoryFlaretype(folder, flareType)
+
+        path = directory + '\\{}'.format(name)
+        CallistoSpectrogram.join_many(bursts_here).save(path)
+        joined = joined.append(dataframe.loc[index])
+        joined.at[index, 'remarks'] = path
+
+    return joined
+
+def Callisto_simple_flare(index, dataframe):
+    Spectra = CallistoSpectrogram.read(dataframe.loc[index]['remarks'])
+    Spectra.peek()
+    return Spectra
+
+def preview(dataframe, show_details = True):
+    for index, elem in dataframe.iterrows():
+        row = dataframe.loc[index]
+        instrument, year, start, end = range_Generator(index, dataframe)
+        if show_details:
+            print("Type "+str(row['class']))
+            print('  Range ' + row['lower'], row['upper'])
+            print(start)
+            print(end)
+            print(creator_date(row['date']))
+        Callisto_simple_flare(index, dataframe)
