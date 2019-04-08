@@ -209,7 +209,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
     @classmethod
     def join_many(cls, specs, mk_arr=None, nonlinear=False,
-                  maxgap=None, fill=LinearTimeSpectrogram.JOIN_REPEAT):
+                  maxgap=None, fill=None):
         """Produce new Spectrogram that contains spectrograms
         joined together in time.
         Using linearSpectrogram.JOINREPEAT as default to fill the gaps
