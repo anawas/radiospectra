@@ -3,7 +3,7 @@ radiospectra
 
 This package aims update and extend the Callisto parts of the existing https://github.com/sunpy/radiospectra repository.
 
-Istallation
+Installation
 -----------
 
 Clone this repository: ``git clone https://github.com/i4Ds/radiospectra``
