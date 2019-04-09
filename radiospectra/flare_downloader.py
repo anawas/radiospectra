@@ -20,6 +20,7 @@ def preprocessing_txt(data):
     Returns:
       Preprocessed dataframe
     """
+    data['date'] = data['date'].apply(lambda x: '{0:0>8}'.format(x))
     data['end'] = data['end'].apply(lambda x: '{0:0>6}'.format(x))
     data['start'] = data['start'].apply(lambda x: '{0:0>6}'.format(x))
     data['lower'] = data['lower'].astype(str).map(lambda x: x.rstrip('xX'))
@@ -30,6 +31,17 @@ def preprocessing_txt(data):
     # preprocessing data (?)
     data['remarks'] = data['remarks'].astype(str)
     return data
+
+
+def date_cleaner(date):
+    """
+    Cleans date string after modifing previos years
+    """
+    date = str(date)
+    long = len(date)-2
+    new = ''
+    for x in range(long): new = new + date[x]
+    return new
 
 
 #It may not work if the given frequencies are out of range
@@ -47,10 +59,10 @@ def creator_instrument(lower, upper):
 
     lower = int(lower)
     upper = int(upper)
-    if lower >= 1200 and upper <= 1800: return "BLEN5M"
-    if lower >= 175 and upper <= 870: return "BLEN7M"
-    if lower >= 20 and upper <= 80: return "BLENSW"
-
+    if lower>=1200 and upper<=1800 : return "BLEN5M"
+    if lower>=110 and upper<=870 : return "BLEN7M"
+    #The Upper value is set to 110 in order to download a bigger wide of flares
+    if lower>=20 and upper<=110 : return "BLENSW"
 
 def creator_date(date):
     """
@@ -61,7 +73,7 @@ def creator_date(date):
     Returns:
         Modified date to use with standard Time Libraries
     """
-    date = str(int(date))
+    date = date_cleaner(date)
     date = re.sub(r'((?:(?=(1|.))\2){2})(?!$)', r'\1/', date)
     if int(date[0] + date[1]) > 50:
         date = '19' + date
