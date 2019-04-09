@@ -59,7 +59,7 @@ git repository as:
 
 .. code-block:: bash
 
-   pip install git+https://github.com/sunpy/radiospectra.git
+   pip install git+https://github.com/i4Ds/radiospectra.git
 
 
 License
