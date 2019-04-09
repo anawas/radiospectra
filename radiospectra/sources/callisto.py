@@ -268,6 +268,14 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         return CallistoSpectrogram(data.data, header=new_header, axes_header=new_axes_header, **params)
 
     @classmethod
+    def detect_and_combine_polarisations(specs: ['CallistoSpectrogram']) -> ['CallistoSpectrogram']:
+        print('detect_and_combine_polarisations not yet implemented')
+
+    @classmethod
+    def combine_polarisation(spec1: 'CallistoSpectrogram', spec2: 'CallistoSpectrogram') -> 'CallistoSpectrogram':
+        print('combine_polarisation not yet implemented')
+        
+    @classmethod
     def read(cls, filename, **kwargs):
         """Reads in FITS file and return a new CallistoSpectrogram.
         Any unknown (i.e. any except filename) keyword arguments get
