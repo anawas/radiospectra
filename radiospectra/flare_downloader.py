@@ -28,7 +28,6 @@ def preprocessing_txt(data):
     # Sanity preserver
     # data['lower'] = data['lower'].astype(str).str.replace('\D-', '')
     # data['upper'] = data['upper'].astype(str).str.replace('\D+', '')
-    # preprocessing data (?)
     data['remarks'] = data['remarks'].astype(str)
     return data
 
