@@ -263,7 +263,6 @@ def e_Callisto_exceptionSeeker(row_num, dataframe, new_frame, exceptions_fr, fol
         if sort == True:
             directory = directorySubtypeGenerator(folder, flareType, subtype)
         else:
-            #directory = os.path.realpath('./{}'.format(folder))
             directory = directoryFlaretype(folder, flareType)
 
         dirlist = ''
