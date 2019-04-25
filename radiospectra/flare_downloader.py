@@ -1,8 +1,10 @@
 import re
 import os
+import time
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from os.path import relpath
 from astropy.io import fits
 from .sources import CallistoSpectrogram
 from .sources.callisto import query
@@ -267,7 +269,7 @@ def e_Callisto_exceptionSeeker(row_num, dataframe, new_frame, exceptions_fr, fol
         dirlist = ''
         for url in urls:
             dire = download_file(url, directory)
-            dirlist = dirlist + dire + ','
+            dirlist = dirlist + relpath(dire) + ','
 
         new_frame = new_frame.append(dataframe.loc[row_num])
         new_frame.at[row_num, 'remarks'] = dirlist
@@ -314,7 +316,7 @@ def e_Callisto_burst_downloader(data, sort=False, folder="e-Callisto_Flares", ex
             as well as the paths of their respective FITS files.
         exceptions_frame: Pandas dataframe. Contains information about files that could not be downloaded
     """
-
+    start = time.time()
     data = preprocessing_txt(data)
     os.makedirs('./{}'.format(folder), exist_ok=exist)
     clean_directions = pd.DataFrame(columns=data.columns)
@@ -323,7 +325,9 @@ def e_Callisto_burst_downloader(data, sort=False, folder="e-Callisto_Flares", ex
         clean_directions, exceptions_frame = e_Callisto_exceptionSeeker(index, data, clean_directions, exceptions_frame,
                                                                         folder, sort)
     rclean_test, rexcept_test = iter_remarks_Cleaners(clean_directions)
-    exceptions_frame.append(rexcept_test)
+    exceptions_frame = exceptions_frame.append(rexcept_test)
+    end = time.time()
+    print("Download completed in ----- " + str(end - start) + " secs")
     return rclean_test, exceptions_frame
 
 
@@ -332,6 +336,7 @@ def e_Callisto_Burst_simplifier(dataframe, folder, sort=False):
     """
     Returns a new data frame with the direction of the joined data set
     """
+    start = time.time()
     os.makedirs('./{}'.format(folder))
     joined = pd.DataFrame(columns=dataframe.columns)
 
@@ -353,10 +358,11 @@ def e_Callisto_Burst_simplifier(dataframe, folder, sort=False):
             directory = directoryFlaretype(folder, flareType)
 
         path = directory + '\\{}'.format(name)
-        CallistoSpectrogram.join_many(bursts_here).save(path)
+        CallistoSpectrogram.join_many(bursts_here).save(relpath(path))
         joined = joined.append(dataframe.loc[index])
-        joined.at[index, 'remarks'] = path
-
+        joined.at[index, 'remarks'] = relpath(path)
+    end = time.time()
+    print("Joined after----- " + str(end - start) + " secs")
     return joined
 
 def Callisto_simple_flare(index, dataframe):
