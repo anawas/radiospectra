@@ -6,7 +6,7 @@ import datetime
 from collections import defaultdict
 
 import numpy as np
-import ntpath
+import os, ntpath
 from astropy.io import fits
 from astropy.nddata.ccddata import CCDData
 from bs4 import BeautifulSoup
@@ -523,10 +523,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         if np.array_equal(new_freq_axis, borderless_specs[0].freq_axis):
             for sp in borderless_specs:
                 c_start_time = ((sp.start + datetime.timedelta(seconds=sp.time_axis[0])) - first_time_point).total_seconds()
-                new_pos_time = np.where(new_time_axis == c_start_time)[0][0]
+                temp_pos_time = np.where(new_time_axis == c_start_time)
+                if len(temp_pos_time[0]) == 1:
+                    new_pos_time = temp_pos_time[0][0]
 
-                new_data[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[:, :]
-                new_data.mask[:, new_pos_time:new_pos_time + sp.shape[1]] = False
+                    new_data[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[:, :]
+                    new_data.mask[:, new_pos_time:new_pos_time + sp.shape[1]] = False
         else:
             for sp in borderless_specs:
                 for pos_freq in range(sp.shape[0]):
@@ -617,8 +619,20 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         table.header['TZERO2'] = 0  
 
         hdulist = data.to_hdu()
-        hdulist.insert(1,table)
-        hdulist.writeto(filepath)
+        hdulist.insert(1, table)
+
+        if not os.path.exists(filepath):
+            hdulist.writeto(filepath)
+            return filepath
+        else:
+            i = 0
+            split = filepath.split('.')
+            new_filepath = split[0] + f' ({i})' + f'{"." if len(split[1:]) > 0 else ""}' + '.'.join(split[1:])
+            while os.path.exists(new_filepath):
+                i += 1
+                new_filepath = split[0] + f' ({i})' + f'{"." if len(split[1:]) > 0 else ""}' + '.'.join(split[1:])
+            hdulist.writeto(new_filepath)
+            return new_filepath
 
     def get_header(self):
         """Returns the updated header."""
@@ -638,6 +652,15 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
     @classmethod
     def combine_polarisation(cls, spec1: 'CallistoSpectrogram', spec2: 'CallistoSpectrogram') -> 'CallistoSpectrogram':
+        """Combine two spectrograms that are polarisations of the same event
+
+        Parameters
+        ----------
+        spec1 : CallistoSpectrogram
+            The first polarized spectrogram.
+        spec2 : CallistoSpectrogram
+            The second polarized spectrogram.
+        """
 
         # checks
         delta1 = float(spec1.header['CDELT1'])
