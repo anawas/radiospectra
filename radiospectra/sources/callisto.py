@@ -375,13 +375,13 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
         instrument = next(iter(self.instruments))
         if minutes > 0:
-            data = CallistoSpectrogram.from_range(
+            data = CallistoSpectrogram.load_from_range(
                 instrument,
                 self.end,
                 self.end + datetime.timedelta(minutes=minutes)
             )
         elif minutes < 0:
-            data = CallistoSpectrogram.from_range(
+            data = CallistoSpectrogram.load_from_range(
                 instrument,
                 self.start - datetime.timedelta(minutes=-minutes),
                 self.start
@@ -390,7 +390,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             return self
 
         # data = data.clip_freq(self.freq_axis[-1], self.freq_axis[0])
-        return CallistoSpectrogram.new_join_many([self, data], **kwargs)
+        return CallistoSpectrogram.new_join_many([self] + data, **kwargs)
 
     @classmethod
     def join_many(cls, specs, mk_arr=None, nonlinear=False, maxgap=None, fill=None):
@@ -520,17 +520,16 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         new_data = np.ma.array(nan_arr, mask=True)
 
         # fill new data array
-        if np.array_equal(new_freq_axis, borderless_specs[0].freq_axis):
-            for sp in borderless_specs:
+        for sp in borderless_specs:
+            if np.array_equal(new_freq_axis, sp.freq_axis):
                 c_start_time = ((sp.start + datetime.timedelta(seconds=sp.time_axis[0])) - first_time_point).total_seconds()
                 temp_pos_time = np.where(new_time_axis == c_start_time)
                 if len(temp_pos_time[0]) == 1:
                     new_pos_time = temp_pos_time[0][0]
 
                     new_data[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[:, :]
-                    new_data.mask[:, new_pos_time:new_pos_time + sp.shape[1]] = False
-        else:
-            for sp in borderless_specs:
+                    new_data.mask[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data.mask[:, :]
+            else:
                 for pos_freq in range(sp.shape[0]):
                     c_freq = sp.freq_axis[pos_freq]
                     new_pos_freq = np.where(new_freq_axis == c_freq)[0][0]
@@ -542,7 +541,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                         new_pos_time = temp_pos_time[0][0]
 
                         new_data[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[pos_freq, :]
-                        new_data.mask[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = False
+                        new_data.mask[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data.mask[pos_freq, :]
 
         time = first_time_point.time()
         second_of_day = time.hour * 3600 + time.minute * 60 + time.second
