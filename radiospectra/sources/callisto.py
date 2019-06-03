@@ -651,7 +651,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
     @classmethod
     def combine_polarisation(cls, spec1: 'CallistoSpectrogram', spec2: 'CallistoSpectrogram') -> 'CallistoSpectrogram':
-        """Combine two spectrograms that are polarisations of the same event
+        """Compares and combines two spectrograms that are polarisations of the same event
 
         Parameters
         ----------
