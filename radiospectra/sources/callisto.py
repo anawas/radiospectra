@@ -677,7 +677,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         if not np.array_equal(spec1.time_axis, spec2.time_axis):
             raise ValueError('Time axes of spectrograms are not the same')
 
-        merged_matrix = np.ma.empty(spec1.shape, mask=False, dtype=cls.ARRAY_TYPE)
+        merged_matrix = np.ma.empty(spec1.shape, dtype=cls.ARRAY_TYPE)
+        merged_matrix.mask = False
         for row_index in range(spec1.shape[0]):
             for column_index in range(spec1.shape[1]):
                 v1 = spec1.data[row_index, column_index]
