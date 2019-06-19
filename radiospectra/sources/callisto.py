@@ -709,61 +709,78 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         merged_spec.header["DATAMAX"] = merged_matrix.max()
         return merged_spec
 
-    def subtract_bg_sliding_window(self, amount=0.05, window_width=0, affected_width=0):
+    def subtract_bg_sliding_window(self, amount: float = 0.05, window_width: int = 0, affected_width: int = 0,
+                                   change_points: [int] = None):
         _data = self.data.copy()
 
-        _image_height = _data.shape[0]
-        _image_width = _data.shape[1]
+        _og_image_height = _data.shape[0]
+        _og_image_width = _data.shape[1]
 
-        _masked_columns = [x for x in range(_image_width) if np.ma.is_masked(_data[:,x])]
-
-        _window_height = _image_height
-        _window_width = _image_width if (window_width == 0 or window_width > _image_width) else window_width
-        _affected_height = _image_height
-        _affected_width = _image_width if (affected_width == 0 or affected_width > _image_width) else (affected_width if affected_width <= _window_width else _window_width)
-
-        _data_minus_avg = (_data - np.average(_data, 1).reshape(_data.shape[0], 1))
-        _sdevs = [(index, std) for (index, std) in enumerate(np.std(_data_minus_avg, 0))]
-
-        _bg = np.zeros([_image_height,_image_width])
-        _min_sdevs = np.zeros([_image_height,_image_width])
+        _bg = np.zeros([_og_image_height, _og_image_width])
+        _min_sdevs = np.zeros([_og_image_height, _og_image_width])
         _out = _data.copy()
-        _cwp = 0
-        
-        _half = max((_window_width - _affected_width) // 2, 0)
-        _division_fix = _half + _half != max(_window_width - _affected_width, 0)
-        _max_amount = max(1, int(amount * _window_width))
-        
-        #calc initial set of used columns
-        _window_sdevs = [sdev for sdev in _sdevs[:_half] if not np.ma.is_masked(_data[:,sdev[0]])]
-        _sorted_sdevs = sorted(_window_sdevs, key=lambda y: y[1])
-        _bg_used_sdevs = SortedList(_sorted_sdevs, key=lambda y: y[1])
 
-        while _cwp < _image_width:
+        if change_points is None:
+            _images = [(0, _og_image_width)]
+        else:
+            _images = []
+            _temp = 0
+            for _cp in change_points:
+                _images.append((_temp, _cp))
+                _temp = _cp
+            _images.append((_temp, _og_image_width))
 
-            _affected_left = _cwp
-            _affected_right = min(_affected_left + _affected_width, _image_width)
-            _window_left = max(_affected_left-_half-1 if _division_fix else _affected_left-_half,0)
-            _window_right = _affected_right + _half
-                
-            for sdev in _sdevs[max(_window_left-_affected_width,0):_window_left]:
-                _bg_used_sdevs.discard(sdev)
-                
-            if _window_right <= _image_width:
-                _bg_used_sdevs.update([sdev for sdev in _sdevs[_window_right-_affected_width:_window_right] if not np.ma.is_masked(_data[:,sdev[0]])])
-            
-            #calc current background
-            _current_background = np.average(_data[:, [sdev[0] for sdev in _bg_used_sdevs[:_max_amount]]], 1)
-            for sdev in _bg_used_sdevs[:_max_amount]:
-                _min_sdevs[:,sdev[0]] += 1
-            _bg[:, _affected_left:_affected_right] = np.repeat(_current_background.reshape(_bg.shape[0],1),(_affected_right - _affected_left),axis=1)
-            
-            _cwp += _affected_width
+        for (_img_start, _img_end) in _images:
 
-        for m in _masked_columns:
-            _out.data[:,m] = self.MISSING_VALUE
-            
-        return self._with_data(np.subtract(_out,_bg)), self._with_data(_bg), self._with_data(_min_sdevs)
+            _cwp = _img_start
+
+            _img_width = _img_end - _img_start
+            _img_data = _data[:, _img_start:_img_end]
+
+            _window_height = _og_image_height
+            _window_width = _img_width if (window_width == 0 or window_width > _img_width) else window_width
+            _affected_height = _og_image_height
+            _affected_width = _img_width if (affected_width == 0 or affected_width > _img_width) else (
+                affected_width if affected_width <= _window_width else _window_width)
+
+            _data_minus_avg = (_img_data - np.average(_img_data, 1).reshape(_img_data.shape[0], 1))
+            _sdevs = [(index, std) for (index, std) in enumerate(np.std(_data_minus_avg, 0))]
+
+            _half = max((_window_width - _affected_width) // 2, 0)
+            _division_fix = _half + _half != max(_img_width - _affected_width, 0)
+            _max_amount = max(1, int(amount * _img_width))
+
+            # calc initial set of used columns
+            _window_sdevs = [sdev for sdev in _sdevs[:_half]]
+            _sorted_sdevs = sorted(_window_sdevs, key=lambda y: y[1])
+            _bg_used_sdevs = SortedList(_sorted_sdevs, key=lambda y: y[1])
+
+            while _cwp <= _img_end:
+
+                _affected_left = _cwp
+                _affected_right = min(_affected_left + _affected_width, _img_end)
+                _window_left = max(_affected_left - _half if _division_fix else _affected_left - _half, _img_start)
+                _window_right = min(_affected_right + _half, _img_end)
+
+                # print(f'{_window_left}:{_affected_left}:{_affected_right}:{_window_right}')
+
+                for sdev in _sdevs[max(_window_left - _affected_width, 0) - _img_start:_window_left - _img_start]:
+                    _bg_used_sdevs.discard(sdev)
+
+                if _window_right <= _img_end:
+                    _bg_used_sdevs.update(
+                        _sdevs[_window_right - _affected_width - _img_start:_window_right - _img_start])
+
+                # calc current background
+                _current_background = np.average(_img_data[:, [sdev[0] for sdev in _bg_used_sdevs[:_max_amount]]], 1)
+                for sdev in _bg_used_sdevs[:_max_amount]:
+                    _min_sdevs[:, sdev[0] + _img_start] += 1
+                _bg[:, _affected_left:_affected_right] = np.repeat(_current_background.reshape(_bg.shape[0], 1),
+                                                                   (_affected_right - _affected_left), axis=1)
+
+                _cwp += _affected_width
+
+        return self._with_data(np.subtract(_out, _bg)), self._with_data(_bg), self._with_data(_min_sdevs)
 
 
     @classmethod
