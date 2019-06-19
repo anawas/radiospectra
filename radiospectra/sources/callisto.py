@@ -479,8 +479,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                             specs.pop(index)
                             specs[index] = merged_spec
 		    
-            if len(specs) == 1:
-                return specs[0]
+        if len(specs) == 1:
+            return specs[0]
 
         if not isinstance(specs[0], CallistoSpectrogram):
             raise ValueError("Can only combine CallistoSpectrogram's.")
