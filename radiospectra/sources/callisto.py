@@ -472,12 +472,27 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             return specs[0]
  
         if polarisations:
-            for index,spec in enumerate(specs[:-2]):
-                    spec2 = specs[index+1]
-                    if spec.header['INSTRUME'] == spec2.header['INSTRUME'] and spec.header['CONTENT'] == spec2.header['CONTENT'] and abs((spec.start - spec2.start).total_seconds())<spec.header['CDELT1']:
-                            merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
-                            specs.pop(index)
-                            specs[index] = merged_spec
+            for index,spec1 in enumerate(specs[:-2]):
+                calculable = True
+                spec2 = specs[index+1]
+                delta1 = float(spec1.header['CDELT1'])
+                delta2 = float(spec1.header['CDELT1'])
+                if abs(delta1 - delta2) > 0.000001:
+                    calculable = False
+                if spec1.header['INSTRUME'] != spec2.header['INSTRUME']:
+                    calculable = False
+                if spec1.shape != spec2.shape:
+                    calculable = False
+                if abs((spec1.start - spec2.start).total_seconds()) > delta1:
+                    calculable = False
+                if not np.array_equal(spec1.freq_axis, spec2.freq_axis):
+                    calculable = False
+                if not np.array_equal(spec1.time_axis, spec2.time_axis):
+                    calculable = False
+                if calculable:
+                    merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
+                    specs.pop(index)
+                    specs[index] = merged_spec
 		    
         if len(specs) == 1:
             return specs[0]
