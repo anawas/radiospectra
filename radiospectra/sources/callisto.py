@@ -470,9 +470,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
         if len(specs) == 1:
             return specs[0]
- 
+
+        specs = sorted(specs,key = lambda spec:datetime.datetime.strptime(spec.header['TIME-OBS'], '%H:%M:%S.%f'))
+
         if polarisations:
-            for index,spec1 in enumerate(specs[:-2]):
+            new_specs = []
+            for index,spec1 in enumerate(specs[:-1]):
                 calculable = True
                 spec2 = specs[index+1]
                 delta1 = float(spec1.header['CDELT1'])
@@ -491,8 +494,9 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                     calculable = False
                 if calculable:
                     merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
-                    specs.pop(index)
-                    specs[index] = merged_spec
+                    new_specs.append(merged_spec)
+                else :
+                    new_specs.append(spec1)
 		    
         if len(specs) == 1:
             return specs[0]
