@@ -454,7 +454,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         return CallistoSpectrogram(data.data, header=new_header, axes_header=new_axes_header, **params)
 
     @classmethod
-    def new_join_many(cls, specs: ['CallistoSpectrogram'],polarisations=False):
+    def new_join_many(cls, specs: ['CallistoSpectrogram'], polarisations=False):
         """Produce new Spectrogram that contains spectrograms
         joined together in time and frequency.
 
@@ -462,6 +462,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         ----------
         specs : list
             List of CallistoSpectrogram's to join together in time.
+        polarisations : bool
+            TODO
         """
 
         # checks
@@ -471,11 +473,11 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         if len(specs) == 1:
             return specs[0]
 
-        specs = sorted(specs,key = lambda spec:datetime.datetime.strptime(spec.header['TIME-OBS'], '%H:%M:%S.%f'))
+        specs = sorted(specs, key=lambda s: datetime.datetime.strptime(s.header['TIME-OBS'], '%H:%M:%S.%f'))
 
         if polarisations:
             new_specs = []
-            for index,spec1 in enumerate(specs[:-1]):
+            for index, spec1 in enumerate(specs[:-1]):
                 calculable = True
                 spec2 = specs[index+1]
                 delta1 = float(spec1.header['CDELT1'])
@@ -495,9 +497,9 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 if calculable:
                     merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
                     new_specs.append(merged_spec)
-                else :
+                else:
                     new_specs.append(spec1)
-		    
+                    
         if len(specs) == 1:
             return specs[0]
 
@@ -685,7 +687,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         spec2 : CallistoSpectrogram
             The second polarized spectrogram.
         """
-        def pythagoras_combine(a,b):
+        def pythagoras_combine(a, b):
             return (a ** 2 + b ** 2) ** 0.5
 
         # checks
@@ -703,10 +705,9 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             raise ValueError('Frequency axes of spectrograms are not the same')
         if not np.array_equal(spec1.time_axis, spec2.time_axis):
             raise ValueError('Time axes of spectrograms are not the same')
-
             
-        vfunk = np.vectorize(pythagoras_combine,excluded=[np.nan])
-        merged_matrix = vfunk(spec1.data,spec2.data)
+        vfunk = np.vectorize(pythagoras_combine, excluded=[np.nan])
+        merged_matrix = vfunk(spec1.data, spec2.data)
     
         merged_spec = spec1._with_data(merged_matrix)
         merged_spec.header["DATAMIN"] = merged_matrix.min()
