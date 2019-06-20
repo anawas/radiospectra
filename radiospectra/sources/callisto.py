@@ -473,32 +473,37 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         if len(specs) == 1:
             return specs[0]
 
-        specs = sorted(specs, key=lambda s: datetime.datetime.strptime(s.header['TIME-OBS'], '%H:%M:%S.%f'))
-
+       # sorts specs
+        specs = sorted(specs,key = lambda x:x.start)
+        
+        # initiates combine_polerations
         if polarisations:
             new_specs = []
             for index, spec1 in enumerate(specs[:-1]):
-                calculable = True
                 spec2 = specs[index+1]
                 delta1 = float(spec1.header['CDELT1'])
                 delta2 = float(spec1.header['CDELT1'])
                 if abs(delta1 - delta2) > 0.000001:
-                    calculable = False
-                if spec1.header['INSTRUME'] != spec2.header['INSTRUME']:
-                    calculable = False
-                if spec1.shape != spec2.shape:
-                    calculable = False
-                if abs((spec1.start - spec2.start).total_seconds()) > delta1:
-                    calculable = False
-                if not np.array_equal(spec1.freq_axis, spec2.freq_axis):
-                    calculable = False
-                if not np.array_equal(spec1.time_axis, spec2.time_axis):
-                    calculable = False
-                if calculable:
-                    merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
-                    new_specs.append(merged_spec)
-                else:
                     new_specs.append(spec1)
+                    continue
+                if spec1.header['INSTRUME'] != spec2.header['INSTRUME']:
+                    new_specs.append(spec1)
+                    continue
+                if spec1.shape != spec2.shape:
+                    new_specs.append(spec1)
+                    continue
+                if abs((spec1.start - spec2.start).total_seconds()) > delta1:
+                    new_specs.append(spec1)
+                    continue
+                if not np.array_equal(spec1.freq_axis, spec2.freq_axis):
+                    new_specs.append(spec1)
+                    continue
+                if not np.array_equal(spec1.time_axis, spec2.time_axis):
+                    new_specs.append(spec1)
+                    continue
+                merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
+                new_specs.append(merged_spec)
+            specs = new_specs
                     
         if len(specs) == 1:
             return specs[0]
@@ -706,8 +711,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         if not np.array_equal(spec1.time_axis, spec2.time_axis):
             raise ValueError('Time axes of spectrograms are not the same')
             
-        vfunk = np.vectorize(pythagoras_combine, excluded=[np.nan])
-        merged_matrix = vfunk(spec1.data, spec2.data)
+        merge_funk = np.vectorize(pythagoras_combine, excluded=[np.nan])
+        merged_matrix = merge_funk(spec1.data, spec2.data)
     
         merged_spec = spec1._with_data(merged_matrix)
         merged_spec.header["DATAMIN"] = merged_matrix.min()
