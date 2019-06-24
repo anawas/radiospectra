@@ -4,15 +4,20 @@ from __future__ import absolute_import, print_function
 
 import datetime
 from collections import defaultdict
+from typing import Union, List
+import time
 
 import numpy as np
-import os, ntpath
-from astropy.io import fits
-from astropy.nddata.ccddata import CCDData
+import os
+import ntpath
 from bs4 import BeautifulSoup
 from scipy.optimize import leastsq
 from scipy.ndimage import gaussian_filter1d
 from sortedcontainers import SortedList
+import ruptures as rpt
+
+from astropy.io import fits
+from astropy.nddata.ccddata import CCDData
 
 from sunpy.time import parse_time
 from sunpy.util import minimal_pairs, to_signed
@@ -715,7 +720,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         return merged_spec
 
     def subtract_bg_sliding_window(self, amount: float = 0.05, window_width: int = 0, affected_width: int = 0,
-                                   change_points: [int] = None):
+                                   change_points: Union[bool, List[int]] = False):
         _data = self.data.copy()
 
         _og_image_height = _data.shape[0]
@@ -725,12 +730,27 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         _min_sdevs = np.zeros([_og_image_height, _og_image_width])
         _out = _data.copy()
 
-        if change_points is None:
+        time_cp = time.time()
+
+        if isinstance(change_points, bool):
+            if change_points:
+                _cps = self.estimate_change_points()
+            else:
+                _cps = []
+        else:
+            _cps = change_points
+
+        print(_cps)
+        print(f'change points are: {_cps} | time needed: {time.time() - time_cp}')
+
+        time_bs = time.time()
+
+        if len(_cps) == 0:
             _images = [(0, _og_image_width)]
         else:
             _images = []
             _temp = 0
-            for _cp in change_points:
+            for _cp in _cps:
                 _images.append((_temp, _cp))
                 _temp = _cp
             _images.append((_temp, _og_image_width))
@@ -785,8 +805,22 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
                 _cwp += _affected_width
 
+        print(f'time needed for background subtraction: {time.time() - time_bs}')
+
         return self._with_data(np.subtract(_out, _bg)), self._with_data(_bg), self._with_data(_min_sdevs)
 
+    def estimate_change_points(self):
+        """Estimates the change points of the spectrogramm and returns the indices."""
+
+        avgs = np.average(self.data, axis=0)
+        penalty = np.std(avgs)**2 * (np.log(len(avgs))) * 1.5
+        try:
+            return rpt.Pelt(model='rbf').fit_predict(avgs, penalty)[:-1]
+        except MemoryError:
+            reds = len(avgs) // 5000
+            arr = avgs[::reds]
+            model = rpt.Pelt(model='rbf').fit(arr)
+            return np.multiply(model.predict(pen=penalty)[:-1], reds)
 
     @classmethod
     def is_datasource_for(cls, header):
