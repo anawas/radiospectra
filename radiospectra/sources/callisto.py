@@ -718,7 +718,10 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             
         merge_funk = np.vectorize(pythagoras_combine, excluded=[np.nan])
         merged_matrix = merge_funk(spec1.data, spec2.data)
-    
+        x = np.logical_or(spec1.data.mask,spec2.data.mask)
+        merged_matrix = np.ma.array(merged_matrix,mask=x)
+		
+		
         merged_spec = spec1._with_data(merged_matrix)
         merged_spec.header["DATAMIN"] = merged_matrix.min()
         merged_spec.header["DATAMAX"] = merged_matrix.max()
