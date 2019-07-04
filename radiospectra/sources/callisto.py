@@ -483,134 +483,149 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         
         # initiates combine_polerations
         if polarisations:
+            PWM_VAL_List = set(map(lambda x: x.header['PWM_VAL'], specs))
+            Sorting_dict = dict(map(lambda x: (x,[]), PWM_VAL_List))
+            for spec in specs:
+                Sorting_dict[spec.header['PWM_VAL']].append(spec)
+            map(lambda x: x.start, list(Sorting_dict.values()))
             new_specs = []
-            for index, spec1 in enumerate(specs[:-1]):
-                spec2 = specs[index+1]
-                delta1 = float(spec1.header['CDELT1'])
-                delta2 = float(spec1.header['CDELT1'])
-                if abs(delta1 - delta2) > 0.000001:
-                    new_specs.append(spec1)
-                    continue
-                if spec1.header['INSTRUME'] != spec2.header['INSTRUME']:
-                    new_specs.append(spec1)
-                    continue
-                if spec1.shape != spec2.shape:
-                    new_specs.append(spec1)
-                    continue
-                if abs((spec1.start - spec2.start).total_seconds()) > delta1:
-                    new_specs.append(spec1)
-                    continue
-                if not np.array_equal(spec1.freq_axis, spec2.freq_axis):
-                    new_specs.append(spec1)
-                    continue
-                if not np.array_equal(spec1.time_axis, spec2.time_axis):
-                    new_specs.append(spec1)
-                    continue
-                merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
-                new_specs.append(merged_spec)
+            for PWM, specs in Sorting_dict.items():
+                for index, spec1 in enumerate(specs[:-1]):
+                    spec2 = specs[index+1]
+                    delta1 = float(spec1.header['CDELT1'])
+                    delta2 = float(spec1.header['CDELT1'])
+                    if abs(delta1 - delta2) > 0.000001:
+                        new_specs.append(spec1)
+                        continue
+                    if spec1.header['INSTRUME'] != spec2.header['INSTRUME']:
+                        new_specs.append(spec1)
+                        continue
+                    if spec1.shape != spec2.shape:
+                        new_specs.append(spec1)
+                        continue
+                    if abs((spec1.start - spec2.start).total_seconds()) > delta1:
+                        new_specs.append(spec1)
+                        continue
+                    if not np.array_equal(spec1.freq_axis, spec2.freq_axis):
+                        new_specs.append(spec1)
+                        continue
+                    if not np.array_equal(spec1.time_axis, spec2.time_axis):
+                        new_specs.append(spec1)
+                        continue
+                    merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
+                    new_specs.append(merged_spec)
             specs = new_specs
-                    
+        if not polarisations:
+            PWM_VAL_List = set(map(lambda x: "{}_{}".format(x.header['PWM_VAL'],x.filename.split('.')[0].split('_')[-1]), specs))
+            Sorting_dict = dict(map(lambda x: (x,[]), PWM_VAL_List))
+            for spec in specs:
+                Sorting_dict["{}_{}".format(spec.header['PWM_VAL'],spec.filename.split('.')[0].split('_')[-1])].append(spec)
+            map(lambda x: x.start, list(Sorting_dict.values()))
+
         if len(specs) == 1:
             return specs[0]
 
-        if not isinstance(specs[0], CallistoSpectrogram):
-            raise ValueError("Can only combine CallistoSpectrogram's.")
-        instr = specs[0].header['INSTRUME']
-        delta = specs[0].header['CDELT1']
-
-        first_time_point = specs[0].start + datetime.timedelta(seconds=specs[0].time_axis[0])
-        last_time_point = specs[0].start + datetime.timedelta(seconds=specs[0].time_axis[-1])
-
-        for spec in specs[1:]:
-            if not isinstance(spec, CallistoSpectrogram):
+        joined_spec_list = []
+        for PWM, specs in Sorting_dict.items():
+            if not isinstance(specs[0], CallistoSpectrogram):
                 raise ValueError("Can only combine CallistoSpectrogram's.")
-            if spec.header['INSTRUME'] != instr:
-                raise ValueError("Can only combine spectrogram's from the same instrument.")
-            if spec.header['CDELT1'] != delta:
-                raise ValueError("Can only combine spectrogram's with the same time delta (CDELT1).")
+            instr = specs[0].header['INSTRUME']
+            delta = specs[0].header['CDELT1']
 
-            cur_start = spec.start + datetime.timedelta(seconds=spec.time_axis[0])
-            cur_end = spec.start + datetime.timedelta(seconds=spec.time_axis[-1])
+            first_time_point = specs[0].start + datetime.timedelta(seconds=specs[0].time_axis[0])
+            last_time_point = specs[0].start + datetime.timedelta(seconds=specs[0].time_axis[-1])
 
-            if cur_start < first_time_point:
-                first_time_point = cur_start
-            if cur_end > last_time_point:
-                last_time_point = cur_end
+            for spec in specs[1:]:
+                if not isinstance(spec, CallistoSpectrogram):
+                    raise ValueError("Can only combine CallistoSpectrogram's.")
+                if spec.header['INSTRUME'] != instr:
+                    raise ValueError("Can only combine spectrogram's from the same instrument.")
+                if spec.header['CDELT1'] != delta:
+                    raise ValueError("Can only combine spectrogram's with the same time delta (CDELT1).")
 
-        new_header = specs[0].get_header()
-        new_axes_header = specs[0].axes_header
+                cur_start = spec.start + datetime.timedelta(seconds=spec.time_axis[0])
+                cur_end = spec.start + datetime.timedelta(seconds=spec.time_axis[-1])
 
-        borderless_specs = [sp.remove_border() for sp in specs]
+                if cur_start < first_time_point:
+                    first_time_point = cur_start
+                if cur_end > last_time_point:
+                    last_time_point = cur_end
 
-        new_freq_axis = np.array(sorted(_union(set(sp.freq_axis) for sp in borderless_specs), key=lambda y: -y))
-        new_time_axis = np.arange(0, (last_time_point-first_time_point).total_seconds() + 0.00001, delta)
+            new_header = specs[0].get_header()
+            new_axes_header = specs[0].axes_header
 
-        for spec in specs:
-            curr_start = spec.start + datetime.timedelta(seconds=spec.time_axis[0])
-            diff = (curr_start - first_time_point).total_seconds()
-            diff_index = int(diff / delta)
-            new_time_axis[diff_index:diff_index + spec.time_axis.shape[0]] = (spec.time_axis + diff)
+            borderless_specs = [sp.remove_border() for sp in specs]
 
-        nan_arr = np.empty((len(new_freq_axis), len(new_time_axis)), dtype=cls.ARRAY_TYPE)
-        nan_arr[:] = np.nan
-        new_data = np.ma.array(nan_arr, mask=True)
+            new_freq_axis = np.array(sorted(_union(set(sp.freq_axis) for sp in borderless_specs), key=lambda y: -y))
+            new_time_axis = np.arange(0, (last_time_point-first_time_point).total_seconds() + 0.00001, delta)
 
-        # fill new data array
-        for sp in borderless_specs:
-            if np.array_equal(new_freq_axis, sp.freq_axis):
-                c_start_time = ((sp.start + datetime.timedelta(seconds=sp.time_axis[0])) - first_time_point).total_seconds()
-                temp_pos_time = np.where(new_time_axis == c_start_time)
-                if len(temp_pos_time[0]) == 1:
-                    new_pos_time = temp_pos_time[0][0]
+            for spec in specs:
+                curr_start = spec.start + datetime.timedelta(seconds=spec.time_axis[0])
+                diff = (curr_start - first_time_point).total_seconds()
+                diff_index = int(diff / delta)
+                new_time_axis[diff_index:diff_index + spec.time_axis.shape[0]] = (spec.time_axis + diff)
 
-                    new_data[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[:, :]
-                    new_data.mask[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data.mask[:, :]
-            else:
-                for pos_freq in range(sp.shape[0]):
-                    c_freq = sp.freq_axis[pos_freq]
-                    new_pos_freq = np.where(new_freq_axis == c_freq)[0][0]
+            nan_arr = np.empty((len(new_freq_axis), len(new_time_axis)), dtype=cls.ARRAY_TYPE)
+            nan_arr[:] = np.nan
+            new_data = np.ma.array(nan_arr, mask=True)
 
+            # fill new data array
+            for sp in borderless_specs:
+                if np.array_equal(new_freq_axis, sp.freq_axis):
                     c_start_time = ((sp.start + datetime.timedelta(seconds=sp.time_axis[0])) - first_time_point).total_seconds()
-
                     temp_pos_time = np.where(new_time_axis == c_start_time)
                     if len(temp_pos_time[0]) == 1:
                         new_pos_time = temp_pos_time[0][0]
 
-                        new_data[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[pos_freq, :]
-                        new_data.mask[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data.mask[pos_freq, :]
+                        new_data[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[:, :]
+                        new_data.mask[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data.mask[:, :]
+                else:
+                    for pos_freq in range(sp.shape[0]):
+                        c_freq = sp.freq_axis[pos_freq]
+                        new_pos_freq = np.where(new_freq_axis == c_freq)[0][0]
 
-        time = first_time_point.time()
-        second_of_day = time.hour * 3600 + time.minute * 60 + time.second
+                        c_start_time = ((sp.start + datetime.timedelta(seconds=sp.time_axis[0])) - first_time_point).total_seconds()
 
-        params = {
-            'time_axis': new_time_axis,
-            'freq_axis': new_freq_axis,
-            'start': first_time_point,
-            'end': last_time_point,
-            't_delt': delta,
-            't_init': second_of_day,
-            't_label': specs[0].t_label,
-            'f_label': specs[0].f_label,
-            'content': specs[0].content,
-            'instruments': _union(spec.instruments for spec in specs),
-        }
+                        temp_pos_time = np.where(new_time_axis == c_start_time)
+                        if len(temp_pos_time[0]) == 1:
+                            new_pos_time = temp_pos_time[0][0]
 
-        new_header['DATE-OBS'] = min([x.get_header()['DATE-OBS'] for x in specs])
-        new_header['TIME-OBS'] = min([x.get_header()['TIME-OBS'] for x in specs])
-        new_header['DATE-END'] = max([x.get_header()['DATE-END'] for x in specs])
-        new_header['TIME-END'] = max([x.get_header()['TIME-END'] for x in specs])
-        new_header['DATAMIN'] = min([x.get_header()['DATAMIN'] for x in specs])
-        new_header['DATAMAX'] = max([x.get_header()['DATAMAX'] for x in specs])
-        new_header['CRVAL1'] = second_of_day
-        new_header['CRVAL2'] = len(new_freq_axis)
+                            new_data[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[pos_freq, :]
+                            new_data.mask[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data.mask[pos_freq, :]
 
-        new_axes_header['NAXIS1'] = int(new_axes_header['BITPIX']) * (len(new_time_axis) + len(new_freq_axis))
-        new_axes_header['TFORM1'] = str(len(new_time_axis)) + "D8.3"
-        new_axes_header['TFORM2'] = str(len(new_freq_axis)) + "D8.3"
+            time = first_time_point.time()
+            second_of_day = time.hour * 3600 + time.minute * 60 + time.second
 
-        joined_spec = CallistoSpectrogram(new_data, header=new_header, axes_header=new_axes_header, **params)
-        joined_spec.adjust_header()
-        return joined_spec
+            params = {
+                'time_axis': new_time_axis,
+                'freq_axis': new_freq_axis,
+                'start': first_time_point,
+                'end': last_time_point,
+                't_delt': delta,
+                't_init': second_of_day,
+                't_label': specs[0].t_label,
+                'f_label': specs[0].f_label,
+                'content': specs[0].content,
+                'instruments': _union(spec.instruments for spec in specs),
+            }
+
+            new_header['DATE-OBS'] = min([x.get_header()['DATE-OBS'] for x in specs])
+            new_header['TIME-OBS'] = min([x.get_header()['TIME-OBS'] for x in specs])
+            new_header['DATE-END'] = max([x.get_header()['DATE-END'] for x in specs])
+            new_header['TIME-END'] = max([x.get_header()['TIME-END'] for x in specs])
+            new_header['DATAMIN'] = min([x.get_header()['DATAMIN'] for x in specs])
+            new_header['DATAMAX'] = max([x.get_header()['DATAMAX'] for x in specs])
+            new_header['CRVAL1'] = second_of_day
+            new_header['CRVAL2'] = len(new_freq_axis)
+
+            new_axes_header['NAXIS1'] = int(new_axes_header['BITPIX']) * (len(new_time_axis) + len(new_freq_axis))
+            new_axes_header['TFORM1'] = str(len(new_time_axis)) + "D8.3"
+            new_axes_header['TFORM2'] = str(len(new_freq_axis)) + "D8.3"
+
+            joined_spec = CallistoSpectrogram(new_data, header=new_header, axes_header=new_axes_header, **params)
+            joined_spec.adjust_header()
+            joined_spec_list.append(joined_spec)
+        return joined_spec_list
 
     def save(self, filepath: str):
         """ Save modified spectrogram back to filepath.
