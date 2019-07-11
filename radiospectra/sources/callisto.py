@@ -20,7 +20,7 @@ from astropy.io import fits
 from astropy.nddata.ccddata import CCDData
 
 from sunpy.time import parse_time
-from sunpy.util import minimal_pairs, to_signed
+from sunpy.util import minimal_pairs
 from sunpy.util.cond_dispatch import ConditionalDispatch, run_cls
 from sunpy.util.net import download_file
 from sunpy.extern.six.moves import urllib
@@ -197,8 +197,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             path of the file to read
         """
         fl = fits.open(filename, **kwargs)
-        data = np.ma.array(fl[0].data, dtype=cls.ARRAY_TYPE, mask=(fl['MASK'].data if 'MASK' in fl else False))
-        data.data[data.mask] = cls.MISSING_VALUE
+        data = np.ma.array(fl[0].data, dtype=cls.ARRAY_TYPE, mask=np.full(fl[0].data.shape, False))
+        # data.data[data.mask] = cls.MISSING_VALUE
         data.mask[np.where(np.isnan(data.data))] = True
 
         axes = fl[1]
@@ -506,7 +506,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 if not np.array_equal(spec1.time_axis, spec2.time_axis):
                     new_specs.append(spec1)
                     continue
-                merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
+                merged_spec = CallistoSpectrogram.combine_polarisation(specs[index], specs[index+1])
                 new_specs.append(merged_spec)
             specs = new_specs
                     
@@ -745,8 +745,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         else:
             _cps = change_points
 
-        print(_cps)
-        print(f'change points are: {_cps} | time needed: {time.time() - time_cp}')
+        #print(_cps)
+        #print(f'change points are: {_cps} | time needed: {time.time() - time_cp}')
 
         time_bs = time.time()
 
@@ -755,6 +755,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         else:
             _images = []
             _temp = 0
+            _cps = sorted(_cps)
             for _cp in _cps:
                 _images.append((_temp, _cp))
                 _temp = _cp
@@ -810,22 +811,66 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
                 _cwp += _affected_width
 
-        print(f'time needed for background subtraction: {time.time() - time_bs}')
+        _sbg = np.ma.subtract(_out, _bg)
+        #print(f'time needed for background subtraction: {time.time() - time_bs}')
 
-        return self._with_data(np.subtract(_out, _bg)), self._with_data(_bg), self._with_data(_min_sdevs)
+        return self._with_data(_sbg), self._with_data(_bg), self._with_data(_min_sdevs), _cps
 
-    def estimate_change_points(self):
+    def estimate_change_points(self, window_width=100, max_length_single_segment=20000, segment_width=10000):
         """Estimates the change points of the spectrogramm and returns the indices."""
 
         avgs = np.average(self.data, axis=0)
-        penalty = np.std(avgs)**2 * (np.log(len(avgs))) * 1.5
-        try:
-            return rpt.Pelt(model='rbf').fit_predict(avgs, penalty)[:-1]
-        except MemoryError:
-            reds = len(avgs) // 5000
-            arr = avgs[::reds]
-            model = rpt.Pelt(model='rbf').fit(arr)
-            return np.multiply(model.predict(pen=penalty)[:-1], reds)
+        penalty = np.log(len(avgs)) * 8 * np.std(avgs) ** 2
+        changepoints = set()
+
+        if len(avgs) > max_length_single_segment:
+            num = len(avgs) // (segment_width - window_width*2)
+            segments = [(x, x + segment_width) for x in np.multiply(range(0, num), (segment_width - window_width*2))]
+            segments.append((len(avgs) - segment_width, len(avgs)))
+        else:
+            segments = [(0, len(avgs))]
+
+        if (len(segments)) > 3:
+            m = 'mahalanobis'
+        else:
+            m = 'rbf'
+
+        for start, end in segments:
+            mod = rpt.Window(model=m, width=window_width).fit(avgs[start:end])
+            res = np.array(mod.predict(pen=penalty)[:-1]) + start
+            #print(f'{start} {end} | {res}')
+            changepoints.update(res)
+        return sorted(changepoints)
+
+    def mask_single_freq_rfi(self, threshold=17, row_window_height=3):
+        """Detects rfi in single frequencies and masks the data
+
+        Parameters
+        ----------
+        threshold : Num
+            Minimal Intensity difference between the row and the mean of the surrounding rows to be flagged as rfi.
+        row_window_height : int
+            The amount of rows before and after should be considered for the surrounding rows.
+        """
+
+        rfi_mask = np.full(self.shape, False)
+
+        for row_index in range(self.shape[0]):
+            aff_row = self.data[row_index]
+            rows_before = self.data[max(row_index - row_window_height, 0):row_index]
+            rows_after = self.data[row_index + 1:min(row_index + 1 + row_window_height, self.shape[0])]
+            window_rows = np.concatenate([rows_before, rows_after], axis=0)
+
+            window_mean = np.mean(window_rows, axis=0)
+            diff = abs(aff_row - window_mean)
+
+            rfi_mask[row_index, np.where(diff >= threshold)] = True
+
+        new_data = self.data.copy()
+        new_data.mask[np.where(rfi_mask)] = True
+        new_data.data[np.where(rfi_mask)] = self.MISSING_VALUE
+
+        return self._with_data(new_data)
 
     @classmethod
     def is_datasource_for(cls, header):
@@ -847,6 +892,25 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         while self.freq_axis[right] == self.freq_axis[-1]:
             right -= 1
         return self[left-1:right+2, :]
+
+    def mark_border(self):
+        """Mark duplicate entries on the borders."""
+        left = 1
+        while self.freq_axis[left] == self.freq_axis[0]:
+            left += 1
+        right = self.data.shape[0] - 1
+        while self.freq_axis[right] == self.freq_axis[-1]:
+            right -= 1
+
+        c_left = left - 1
+        c_right = right + 2
+
+        if c_left > 0:
+            self.data.data[:c_left, :] = self.MISSING_VALUE
+            self.data.mask[:c_left, :] = True
+        if c_right < (len(self.freq_axis)-1):
+            self.data.data[c_right:, :] = self.MISSING_VALUE
+            self.data.mask[c_right:, :] = True
 
     def _overlap(self, other):
         """ Find frequency and time overlap of two spectrograms. """
