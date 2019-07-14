@@ -212,8 +212,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                   maxgap=None, fill=None):
         """Produce new Spectrogram that contains spectrograms
         joined together in time.
-        Using linearSpectrogram.JOINREPEAT as default to fill the gaps
-
+        As accorded, using none as default to fill the gaps.
         Parameters
         ----------
         specs : list
