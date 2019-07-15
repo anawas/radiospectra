@@ -4,23 +4,17 @@ from __future__ import absolute_import, print_function
 
 import datetime
 from collections import defaultdict
-from typing import Union, List
-import time
 
 import numpy as np
-import os
-import ntpath
+from astropy.io import fits
+from astropy.nddata.ccddata import CCDData
 from bs4 import BeautifulSoup
 from scipy.optimize import leastsq
 from scipy.ndimage import gaussian_filter1d
 from sortedcontainers import SortedList
-import ruptures as rpt
-
-from astropy.io import fits
-from astropy.nddata.ccddata import CCDData
 
 from sunpy.time import parse_time
-from sunpy.util import minimal_pairs
+from sunpy.util import minimal_pairs, to_signed
 from sunpy.util.cond_dispatch import ConditionalDispatch, run_cls
 from sunpy.util.net import download_file
 from sunpy.extern.six.moves import urllib
@@ -150,43 +144,70 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
     # List of instruments retrieved in July 2012 from
     # http://soleil.i4ds.ch/solarradio/data/2002-20yy_Callisto/
-    INSTRUMENTS = {
+    INSTRUMENTS = set([
         'ALASKA', 'ALMATY', 'BIR', 'DARO', 'HB9SCT', 'HUMAIN',
         'HURBANOVO', 'KASI', 'KENYA', 'KRIM', 'MALAYSIA', 'MRT1',
         'MRT2', 'OOTY', 'OSRA', 'SWMC', 'TRIEST', 'UNAM'
-    }
+    ])
 
-    ARRAY_TYPE = np.float_
-    MISSING_VALUE = np.nan
+    def save(self, filepath):
+        """ Save modified spectrogram back to filepath.
 
-    def __init__(self, data, time_axis, freq_axis, start, end,
-                 t_init=None, t_delt=None, t_label="Time", f_label="Frequency",
-                 content="", instruments=None, header=None, axes_header=None,
-                 swapped=False, filename=None):
-        # Because of how object creation works, there is no avoiding
-        # unused arguments in this case.
-        # pylint: disable=W0613
+        Parameters
+        ----------
+        filepath : str
+            path to save the spectrogram to
+        """
+        main_header = self.get_header()
+        data = CCDData(data=self.data, header=main_header, unit='Sun')
+        # XXX: Update axes header.
 
-        if not isinstance(data, np.ma.MaskedArray):
-            data = np.ma.array(data, dtype=self.ARRAY_TYPE, mask=False)
+        data.header.append(card=('BZERO',0, 'scaling offset'))
+        data.header.append(card=('BSCALE',1, 'scaling factor'))
+        data.header['NAXIS1'] = (data.header['NAXIS1'], 'length of data axis 1')
+        data.header['NAXIS2'] = (data.header['NAXIS2'], 'length of data axis 2')
 
-        super(CallistoSpectrogram, self).__init__(
-            data, time_axis, freq_axis, start, end,
-            t_init, t_delt, t_label, f_label,
-            content, instruments
+        freq_col = fits.Column(
+            name="FREQUENCY",
+            format=f"{len(self.freq_axis)}D8.3",
+            array=np.reshape(np.array(self.freq_axis), (1, len(self.freq_axis)))
+        )
+        time_col = fits.Column(
+            name="TIME",
+            format=f"{len(self.time_axis)}D8.3",
+            array=np.reshape(np.array(self.time_axis), (1, len(self.time_axis)))
         )
 
-        self.header = header
-        self.axes_header = axes_header
-        self.swapped = swapped
-        if filename:
-            head, tail = ntpath.split(filename)
-            self.filename = tail or ntpath.basename(head)
+        cols = fits.ColDefs([time_col, freq_col])
+        table = fits.BinTableHDU.from_columns(cols, header=self.axes_header, name='AXES')
+
+        table.header['TTYPE1'] = (table.header['TTYPE1'], 'label for field   1')
+        table.header['TFORM1'] = (table.header['TFORM1'], 'data format of field: 8-byte DOUBLE')
+        table.header['TTYPE2'] = (table.header['TTYPE2'], 'label for field   2')
+        table.header['TFORM2'] = (table.header['TFORM2'], 'data format of field: 8-byte DOUBLE')
+        
+        table.header['TSCAL1'] = 1
+        table.header['TZERO1'] = 0
+        table.header['TSCAL2'] = 1
+        table.header['TZERO2'] = 0  
+
+        hdulist = data.to_hdu()
+        hdulist.insert(1,table)
+        hdulist.writeto(filepath)
+
+    def get_header(self):
+        """Returns the updated header."""
+        header = self.header.copy()
+
+        if self.swapped:
+            header['NAXIS2'] = self.shape[1]  # pylint: disable=E1101
+            header['NAXIS1'] = self.shape[0]  # pylint: disable=E1101
         else:
-            self.filename = None
+            header['NAXIS1'] = self.shape[1]  # pylint: disable=E1101
+            header['NAXIS2'] = self.shape[0]  # pylint: disable=E1101
+        return header
 
     @classmethod
-<<<<<<< HEAD
     def join_many(cls, specs, mk_arr=None, nonlinear=False,
                   maxgap=None, fill=None):
         """Produce new Spectrogram that contains spectrograms
@@ -255,9 +276,6 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         
     @classmethod
     def read(cls, filename, **kwargs):
-=======
-    def read(cls, filename: str, **kwargs):
->>>>>>> b56347ead773764d3bad7af56f48e783583e2d68
         """Reads in FITS file and return a new CallistoSpectrogram.
         Any unknown (i.e. any except filename) keyword arguments get
         passed to fits.open.
@@ -268,19 +286,16 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             path of the file to read
         """
         fl = fits.open(filename, **kwargs)
-        data = np.ma.array(fl[0].data, dtype=cls.ARRAY_TYPE, mask=np.full(fl[0].data.shape, False))
-        # data.data[data.mask] = cls.MISSING_VALUE
-        data.mask[np.where(np.isnan(data.data))] = True
-
+        data = np.ma.array(fl[0].data, mask=fl['MASK'].data) if 'MASK' in fl else fl[0].data
         axes = fl[1]
         header = fl[0].header
 
-        # simple patch for time_End issue
+        #simple patch for time_End issue
         if header['TIME-END'][6:] == '60':
             header['TIME-END'] = (header['TIME-END'][:6] + '59', header.comments['TIME-END'] + ' [modified]')
         elif header['TIME-END'][:2] == '24':
             header['TIME-END'] = ('00' + header['TIME-END'][2:], header.comments['TIME-END'] + ' [modified]')
-
+        
         start = _parse_header_time(
             header['DATE-OBS'], header.get('TIME-OBS', header.get('TIME$_OBS'))
         )
@@ -336,36 +351,114 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             freq_axis = \
                 np.linspace(0, data.shape[0] - 1) * f_delt + f_init  # pylint: disable=E1101
 
-        """Remove duplicate entries on the borders."""
-        left = 1
-        while freq_axis[left] == freq_axis[0]:
-            left += 1
-        right = data.shape[0] - 1
-        while freq_axis[right] == freq_axis[-1]:
-            right -= 1
-
-        c_left = left - 1
-        c_right = right + 2
-
-        if c_left > 0:
-            data.data[:c_left, :] = cls.MISSING_VALUE
-            data.mask[:c_left, :] = True
-        if c_right < (len(freq_axis)-1):
-            data.data[c_right:, :] = cls.MISSING_VALUE
-            data.mask[c_right:, :] = True
-
         content = header["CONTENT"]
-        instruments = {header["INSTRUME"]}
+        instruments = set([header["INSTRUME"]])
 
         fl.close()
         return cls(
             data, time_axis, freq_axis, start, end, t_init, t_delt,
             t_label, f_label, content, instruments,
-            header, axes.header, swapped, filename
+            header, axes.header, swapped
         )
 
+    def __init__(self, data, time_axis, freq_axis, start, end,
+                 t_init=None, t_delt=None, t_label="Time", f_label="Frequency",
+                 content="", instruments=None, header=None, axes_header=None,
+                 swapped=False):
+        # Because of how object creation works, there is no avoiding
+        # unused arguments in this case.
+        # pylint: disable=W0613
+
+        super(CallistoSpectrogram, self).__init__(
+            data, time_axis, freq_axis, start, end,
+            t_init, t_delt, t_label, f_label,
+            content, instruments
+        )
+
+        self.header = header
+        self.axes_header = axes_header
+        self.swapped = swapped
+
+    def subtract_bg_sliding_window(self, amount=0.05, window_width=0, affected_width=0):
+        _data = self.data.copy()
+
+        _image_height = _data.shape[0]
+        _image_width = _data.shape[1]
+
+        _masked_columns = [x for x in range(_image_width) if np.ma.is_masked(_data[:,x])]
+
+        _window_height = _image_height
+        _window_width = _image_width if (window_width == 0 or window_width > _image_width) else window_width
+        _affected_height = _image_height
+        _affected_width = _image_width if (affected_width == 0 or affected_width > _image_width) else (affected_width if affected_width <= _window_width else _window_width)
+
+        _data_minus_avg = (_data - np.average(_data, 1).reshape(_data.shape[0], 1))
+        _sdevs = [(index, std) for (index, std) in enumerate(np.std(_data_minus_avg, 0))]
+
+        _bg = np.zeros([_image_height,_image_width])
+        _min_sdevs = np.zeros([_image_height,_image_width])
+        _out = _data.copy()
+        _cwp = 0
+        
+        _half = max((_window_width - _affected_width) // 2, 0)
+        _division_fix = _half + _half != max(_window_width - _affected_width, 0)
+        _max_amount = max(1, int(amount * _window_width))
+        
+        #calc initial set of used columns
+        _window_sdevs = [sdev for sdev in _sdevs[:_half] if not np.ma.is_masked(_data[:,sdev[0]])]
+        _sorted_sdevs = sorted(_window_sdevs, key=lambda y: y[1])
+        _bg_used_sdevs = SortedList(_sorted_sdevs, key=lambda y: y[1])
+
+        while _cwp < _image_width:
+
+            _affected_left = _cwp
+            _affected_right = min(_affected_left + _affected_width, _image_width)
+            _window_left = max(_affected_left-_half-1 if _division_fix else _affected_left-_half,0)
+            _window_right = _affected_right + _half
+                
+            for sdev in _sdevs[max(_window_left-_affected_width,0):_window_left]:
+                _bg_used_sdevs.discard(sdev)
+                
+            if _window_right <= _image_width:
+                _bg_used_sdevs.update([sdev for sdev in _sdevs[_window_right-_affected_width:_window_right] if not np.ma.is_masked(_data[:,sdev[0]])])
+            
+            #calc current background
+            _current_background = np.average(_data[:, [sdev[0] for sdev in _bg_used_sdevs[:_max_amount]]], 1)
+            for sdev in _bg_used_sdevs[:_max_amount]:
+                _min_sdevs[:,sdev[0]] += 1
+            _bg[:, _affected_left:_affected_right] = np.repeat(_current_background.reshape(_bg.shape[0],1),(_affected_right - _affected_left),axis=1)
+            
+            _cwp += _affected_width
+
+        for m in _masked_columns:
+            _out[:,m] = 0
+            
+        return self._with_data(np.subtract(_out,_bg)), self._with_data(_bg), self._with_data(_min_sdevs)
+
+
     @classmethod
-    def read_many(cls, filenames: [str], sort_by=None):
+    def is_datasource_for(cls, header):
+        """Check if class supports data from the given FITS file.
+
+        Parameters
+        ----------
+        header : `~astropy.io.fits.Header`
+            main header of the FITS file
+        """
+        return header.get('instrume', '').strip() in cls.INSTRUMENTS
+
+    def remove_border(self):
+        """Remove duplicate entries on the borders."""
+        left = 0
+        while self.freq_axis[left] == self.freq_axis[0]:
+            left += 1
+        right = self.shape[0] - 1
+        while self.freq_axis[right] == self.freq_axis[-1]:
+            right -= 1
+        return self[left-1:right+2, :]
+
+    @classmethod
+    def read_many(cls, filenames, sort_by=None):
         """Returns a list of CallistoSpectrogram objects read from filenames.
 
         Parameters
@@ -376,53 +469,10 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             optional attribute of the resulting objects to sort from, e.g.
             start to sort by starting time.
         """
-        specs = list(map(cls.read, filenames))
+        objs = list(map(cls.read, filenames))
         if sort_by is not None:
-            specs.sort(key=lambda x: getattr(x, sort_by))
-        return specs
-
-    @classmethod
-    def from_url(cls, url):
-        """Returns CallistoSpectrogram read from URL.
-
-        Parameters
-        ----------
-        url : str
-            URL to retrieve the data from
-
-        Returns
-        -------
-        newSpectrogram : `radiospectra.CallistoSpectrogram`
-        """
-        return cls.read(url)
-
-    @classmethod
-    def load_from_range(cls, instrument, start, end, **kwargs):
-        """Automatically download data from instrument between start and
-        end.
-
-        Parameters
-        ----------
-        instrument : str
-            instrument to retrieve the data from
-        start : `~sunpy.time.parse_time` compatible
-            start of the measurement
-        end : `~sunpy.time.parse_time` compatible
-            end of the measurement
-        """
-
-        kw = {
-            'maxgap': None,
-            'fill': cls.JOIN_REPEAT,
-        }
-
-        kw.update(kwargs)
-        start = parse_time(start)
-        end = parse_time(end)
-        urls = query(start, end, [instrument])
-        specs = list(map(cls.from_url, urls))
-
-        return specs
+            objs.sort(key=lambda x: getattr(x, sort_by))
+        return objs
 
     @classmethod
     def from_range(cls, instrument, start, end, **kwargs):
@@ -438,72 +488,28 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         end : `~sunpy.time.parse_time` compatible
             end of the measurement
         """
+        kw = {
+            'maxgap': None,
+            'fill': cls.JOIN_REPEAT,
+        }
 
-        specs = cls.load_from_range(instrument, start, end, **kwargs)
-        return cls.new_join_many(specs)
+        kw.update(kwargs)
+        start = parse_time(start)
+        end = parse_time(end)
+        urls = query(start, end, [instrument])
+        specs = list(map(cls.from_url, urls))
 
-    def extend(self, minutes=15, **kwargs):
-        """Requests subsequent files from the server. If minutes is negative,
-        retrieve preceding files. """
+        try:
+            new_header = specs[0].get_header()
+            new_axes_header = specs[0].axes_header
+        except IndexError:
+            raise IndexError("No data found")
 
-        if len(self.instruments) != 1:
-            raise ValueError
-
-        instrument = next(iter(self.instruments))
-        if minutes > 0:
-            data = CallistoSpectrogram.load_from_range(
-                instrument,
-                self.end,
-                self.end + datetime.timedelta(minutes=minutes)
-            )
-        elif minutes < 0:
-            data = CallistoSpectrogram.load_from_range(
-                instrument,
-                self.start - datetime.timedelta(minutes=-minutes),
-                self.start
-            )
-        else:
-            return self
-
-        # data = data.clip_freq(self.freq_axis[-1], self.freq_axis[0])
-        return CallistoSpectrogram.new_join_many([self] + data, **kwargs)
-
-    @classmethod
-    def join_many(cls, specs, mk_arr=None, nonlinear=False, maxgap=None, fill=None):
-        """Produce new Spectrogram that contains spectrograms
-        joined together in time.
-        Using linearSpectrogram.JOINREPEAT as default to fill the gaps
-
-        Parameters
-        ----------
-        specs : list
-            List of spectrograms to join together in time.
-        nonlinear : bool
-            If True, leave out gaps between spectrograms. Else, fill them with
-            the value specified in fill.
-        maxgap : float, int or None
-            Largest gap to allow in second. If None, allow gap of arbitrary
-            size.
-        fill : float or int
-            Value to fill missing values (assuming nonlinear=False) with.
-            Can be LinearTimeSpectrogram.JOIN_REPEAT to repeat the values for
-            the time just before the gap.
-        mk_array: function
-            Function that is called to create the resulting array. Can be set
-            to LinearTimeSpectrogram.memap(filename) to create a memory mapped
-            result array.
-        """
-
-        new_header = specs[0].get_header()
-        new_axes_header = specs[0].axes_header
         freq_buckets = defaultdict(list)
-
         for elem in specs:
             freq_buckets[tuple(elem.freq_axis)].append(elem)
 
-        data = cls.combine_frequencies(
-            [super(CallistoSpectrogram, cls).join_many(elem, mk_arr, nonlinear, maxgap, fill) for elem in
-             itervalues(freq_buckets)])
+        data = cls.combine_frequencies([cls.join_many(elem, **kw) for elem in itervalues(freq_buckets)])
 
         params = {
             'time_axis': data.time_axis,
@@ -528,478 +534,6 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         new_axes_header['TFORM2'] = str(len(data.freq_axis)) + "D8.3"
 
         return CallistoSpectrogram(data.data, header=new_header, axes_header=new_axes_header, **params)
-
-    @classmethod
-    def new_join_many(cls, specs: ['CallistoSpectrogram'], polarisations=False):
-        """Produce new Spectrogram that contains spectrograms
-        joined together in time and frequency.
-
-        Parameters
-        ----------
-        specs : list
-            List of CallistoSpectrogram's to join together in time.
-        polarisations : bool
-            TODO
-        """
-
-        # checks
-        if not specs:
-            raise ValueError("Need at least one spectrogram.")
-
-        if len(specs) == 1:
-            return specs[0]
-
-       # sorts specs
-        specs = sorted(specs,key = lambda x:x.start)
-        
-        # initiates combine_polerations
-        if polarisations:
-            PWM_VAL_List = set(map(lambda x: x.header['PWM_VAL'], specs))
-            Sorting_dict = dict(map(lambda x: (x,[]), PWM_VAL_List))
-            for spec in specs:
-                Sorting_dict[spec.header['PWM_VAL']].append(spec)
-            map(lambda x: x.start, list(Sorting_dict.values()))
-            new_specs = []
-            for PWM, specs in Sorting_dict.items():
-                for index, spec1 in enumerate(specs[:-1]):
-                    spec2 = specs[index+1]
-                    delta1 = float(spec1.header['CDELT1'])
-                    delta2 = float(spec1.header['CDELT1'])
-                    if abs(delta1 - delta2) > 0.000001:
-                        new_specs.append(spec1)
-                        continue
-                    if spec1.header['INSTRUME'] != spec2.header['INSTRUME']:
-                        new_specs.append(spec1)
-                        continue
-                    if spec1.shape != spec2.shape:
-                        new_specs.append(spec1)
-                        continue
-                    if abs((spec1.start - spec2.start).total_seconds()) > delta1:
-                        new_specs.append(spec1)
-                        continue
-                    if not np.array_equal(spec1.freq_axis, spec2.freq_axis):
-                        new_specs.append(spec1)
-                        continue
-                    if not np.array_equal(spec1.time_axis, spec2.time_axis):
-                        new_specs.append(spec1)
-                        continue
-                    merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
-                    new_specs.append(merged_spec)
-            specs = new_specs
-        if not polarisations:
-            PWM_VAL_List = set(map(lambda x: "{}_{}".format(x.header['PWM_VAL'],x.filename.split('.')[0].split('_')[-1]), specs))
-            Sorting_dict = dict(map(lambda x: (x,[]), PWM_VAL_List))
-            for spec in specs:
-                Sorting_dict["{}_{}".format(spec.header['PWM_VAL'],spec.filename.split('.')[0].split('_')[-1])].append(spec)
-            map(lambda x: x.start, list(Sorting_dict.values()))
-
-        if len(specs) == 1:
-            return specs[0]
-
-        joined_spec_list = []
-        for PWM, specs in Sorting_dict.items():
-            if not isinstance(specs[0], CallistoSpectrogram):
-                raise ValueError("Can only combine CallistoSpectrogram's.")
-            instr = specs[0].header['INSTRUME']
-            delta = specs[0].header['CDELT1']
-
-            first_time_point = specs[0].start + datetime.timedelta(seconds=specs[0].time_axis[0])
-            last_time_point = specs[0].start + datetime.timedelta(seconds=specs[0].time_axis[-1])
-
-            for spec in specs[1:]:
-                if not isinstance(spec, CallistoSpectrogram):
-                    raise ValueError("Can only combine CallistoSpectrogram's.")
-                if spec.header['INSTRUME'] != instr:
-                    raise ValueError("Can only combine spectrogram's from the same instrument.")
-                if spec.header['CDELT1'] != delta:
-                    raise ValueError("Can only combine spectrogram's with the same time delta (CDELT1).")
-
-                cur_start = spec.start + datetime.timedelta(seconds=spec.time_axis[0])
-                cur_end = spec.start + datetime.timedelta(seconds=spec.time_axis[-1])
-
-                if cur_start < first_time_point:
-                    first_time_point = cur_start
-                if cur_end > last_time_point:
-                    last_time_point = cur_end
-
-            new_header = specs[0].get_header()
-            new_axes_header = specs[0].axes_header
-
-            borderless_specs = [sp.remove_border() for sp in specs]
-
-            new_freq_axis = np.array(sorted(_union(set(sp.freq_axis) for sp in borderless_specs), key=lambda y: -y))
-            new_time_axis = np.arange(0, (last_time_point-first_time_point).total_seconds() + 0.00001, delta)
-
-            for spec in specs:
-                curr_start = spec.start + datetime.timedelta(seconds=spec.time_axis[0])
-                diff = (curr_start - first_time_point).total_seconds()
-                diff_index = int(diff / delta)
-                new_time_axis[diff_index:diff_index + spec.time_axis.shape[0]] = (spec.time_axis + diff)
-
-            nan_arr = np.empty((len(new_freq_axis), len(new_time_axis)), dtype=cls.ARRAY_TYPE)
-            nan_arr[:] = np.nan
-            new_data = np.ma.array(nan_arr, mask=True)
-
-            # fill new data array
-            for sp in borderless_specs:
-                if np.array_equal(new_freq_axis, sp.freq_axis):
-                    c_start_time = ((sp.start + datetime.timedelta(seconds=sp.time_axis[0])) - first_time_point).total_seconds()
-                    temp_pos_time = np.where(new_time_axis == c_start_time)
-                    if len(temp_pos_time[0]) == 1:
-                        new_pos_time = temp_pos_time[0][0]
-
-                        new_data[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[:, :]
-                        new_data.mask[:, new_pos_time:new_pos_time + sp.shape[1]] = sp.data.mask[:, :]
-                else:
-                    for pos_freq in range(sp.shape[0]):
-                        c_freq = sp.freq_axis[pos_freq]
-                        new_pos_freq = np.where(new_freq_axis == c_freq)[0][0]
-
-                        c_start_time = ((sp.start + datetime.timedelta(seconds=sp.time_axis[0])) - first_time_point).total_seconds()
-
-                        temp_pos_time = np.where(new_time_axis == c_start_time)
-                        if len(temp_pos_time[0]) == 1:
-                            new_pos_time = temp_pos_time[0][0]
-
-                            new_data[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[pos_freq, :]
-                            new_data.mask[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data.mask[pos_freq, :]
-
-            time = first_time_point.time()
-            second_of_day = time.hour * 3600 + time.minute * 60 + time.second
-
-            params = {
-                'time_axis': new_time_axis,
-                'freq_axis': new_freq_axis,
-                'start': first_time_point,
-                'end': last_time_point,
-                't_delt': delta,
-                't_init': second_of_day,
-                't_label': specs[0].t_label,
-                'f_label': specs[0].f_label,
-                'content': specs[0].content,
-                'instruments': _union(spec.instruments for spec in specs),
-            }
-
-            new_header['DATE-OBS'] = min([x.get_header()['DATE-OBS'] for x in specs])
-            new_header['TIME-OBS'] = min([x.get_header()['TIME-OBS'] for x in specs])
-            new_header['DATE-END'] = max([x.get_header()['DATE-END'] for x in specs])
-            new_header['TIME-END'] = max([x.get_header()['TIME-END'] for x in specs])
-            new_header['DATAMIN'] = min([x.get_header()['DATAMIN'] for x in specs])
-            new_header['DATAMAX'] = max([x.get_header()['DATAMAX'] for x in specs])
-            new_header['CRVAL1'] = second_of_day
-            new_header['CRVAL2'] = len(new_freq_axis)
-
-            new_axes_header['NAXIS1'] = int(new_axes_header['BITPIX']) * (len(new_time_axis) + len(new_freq_axis))
-            new_axes_header['TFORM1'] = str(len(new_time_axis)) + "D8.3"
-            new_axes_header['TFORM2'] = str(len(new_freq_axis)) + "D8.3"
-
-            joined_spec = CallistoSpectrogram(new_data, header=new_header, axes_header=new_axes_header, **params)
-            joined_spec.adjust_header()
-            joined_spec_list.append(joined_spec)
-        return joined_spec_list
-
-    def save(self, filepath: str):
-        """ Save modified spectrogram back to filepath.
-
-        Parameters
-        ----------
-        filepath : str
-            path to save the spectrogram to
-        """
-        main_header = self.get_header()
-        data = CCDData(data=self.data, header=main_header, unit='Sun')
-        # XXX: Update axes header.
-
-        data.header.append(card=('BZERO',0, 'scaling offset'))
-        data.header.append(card=('BSCALE',1, 'scaling factor'))
-        data.header['NAXIS1'] = (data.header['NAXIS1'], 'length of data axis 1')
-        data.header['NAXIS2'] = (data.header['NAXIS2'], 'length of data axis 2')
-
-        freq_col = fits.Column(
-            name="FREQUENCY",
-            format=f"{len(self.freq_axis)}D8.3",
-            array=np.reshape(np.array(self.freq_axis), (1, len(self.freq_axis)))
-        )
-        time_col = fits.Column(
-            name="TIME",
-            format=f"{len(self.time_axis)}D8.3",
-            array=np.reshape(np.array(self.time_axis), (1, len(self.time_axis)))
-        )
-
-        cols = fits.ColDefs([time_col, freq_col])
-        table = fits.BinTableHDU.from_columns(cols, header=self.axes_header, name='AXES')
-
-        table.header['TTYPE1'] = (table.header['TTYPE1'], 'label for field   1')
-        table.header['TFORM1'] = (table.header['TFORM1'], 'data format of field: 8-byte DOUBLE')
-        table.header['TTYPE2'] = (table.header['TTYPE2'], 'label for field   2')
-        table.header['TFORM2'] = (table.header['TFORM2'], 'data format of field: 8-byte DOUBLE')
-        
-        table.header['TSCAL1'] = 1
-        table.header['TZERO1'] = 0
-        table.header['TSCAL2'] = 1
-        table.header['TZERO2'] = 0  
-
-        hdulist = data.to_hdu()
-        hdulist.insert(1, table)
-
-        if not os.path.exists(filepath):
-            hdulist.writeto(filepath)
-            return filepath
-        else:
-            i = 0
-            split = filepath.split('.')
-            new_filepath = split[0] + f' ({i})' + f'{"." if len(split[1:]) > 0 else ""}' + '.'.join(split[1:])
-            while os.path.exists(new_filepath):
-                i += 1
-                new_filepath = split[0] + f' ({i})' + f'{"." if len(split[1:]) > 0 else ""}' + '.'.join(split[1:])
-            hdulist.writeto(new_filepath)
-            return new_filepath
-
-    def get_header(self):
-        """Returns the updated header."""
-        header = self.header.copy()
-
-        if self.swapped:
-            header['NAXIS2'] = self.shape[1]  # pylint: disable=E1101
-            header['NAXIS1'] = self.shape[0]  # pylint: disable=E1101
-        else:
-            header['NAXIS1'] = self.shape[1]  # pylint: disable=E1101
-            header['NAXIS2'] = self.shape[0]  # pylint: disable=E1101
-        return header
-
-    @classmethod
-    def detect_and_combine_polarisations(cls, specs: ['CallistoSpectrogram']) -> ['CallistoSpectrogram']:
-        raise NotImplementedError('detect_and_combine_polarisations not yet implemented')
-
-
-    @classmethod
-    def combine_polarisation(cls, spec1: 'CallistoSpectrogram', spec2: 'CallistoSpectrogram') -> 'CallistoSpectrogram':
-        """Compares and combines two spectrograms that are polarisations of the same event
-
-        Parameters
-        ----------
-        spec1 : CallistoSpectrogram
-            The first polarized spectrogram.
-        spec2 : CallistoSpectrogram
-            The second polarized spectrogram.
-        """
-        def pythagoras_combine(a, b):
-            return (a ** 2 + b ** 2) ** 0.5
-
-        # checks
-        delta1 = float(spec1.header['CDELT1'])
-        delta2 = float(spec1.header['CDELT1'])
-        if abs(delta1 - delta2) > 0.000001:
-            raise ValueError('CDELT1 of spectrograms are not the same')
-        if spec1.header['INSTRUME'] != spec2.header['INSTRUME']:
-            raise ValueError('Instruments of spectrograms are not the same')
-        if spec1.shape != spec2.shape:
-            raise ValueError('Shapes of spectrograms not the same')
-        if abs((spec1.start - spec2.start).total_seconds()) > delta1:
-            raise ValueError('Start times of spectrograms are too far from each other')
-        if not np.array_equal(spec1.freq_axis, spec2.freq_axis):
-            raise ValueError('Frequency axes of spectrograms are not the same')
-        if not np.array_equal(spec1.time_axis, spec2.time_axis):
-            raise ValueError('Time axes of spectrograms are not the same')
-            
-        merge_funk = np.vectorize(pythagoras_combine, excluded=[np.nan])
-        merged_matrix = merge_funk(spec1.data, spec2.data)
-        x = np.logical_or(spec1.data.mask,spec2.data.mask)
-        merged_matrix = np.ma.array(merged_matrix,mask=x)
-		
-		
-        merged_spec = spec1._with_data(merged_matrix)
-        merged_spec.header["DATAMIN"] = merged_matrix.min()
-        merged_spec.header["DATAMAX"] = merged_matrix.max()
-        return merged_spec
-
-    def subtract_bg_sliding_window(self, amount: float = 0.05, window_width: int = 0, affected_width: int = 0,
-                                   change_points: Union[bool, List[int]] = False):
-        _data = self.data.copy()
-
-        _og_image_height = _data.shape[0]
-        _og_image_width = _data.shape[1]
-
-        _bg = np.zeros([_og_image_height, _og_image_width])
-        _min_sdevs = np.zeros([_og_image_height, _og_image_width])
-        _out = _data.copy()
-
-        time_cp = time.time()
-
-        if isinstance(change_points, bool):
-            if change_points:
-                _cps = self.estimate_change_points()
-            else:
-                _cps = []
-        else:
-            _cps = change_points
-
-        #print(_cps)
-        #print(f'change points are: {_cps} | time needed: {time.time() - time_cp}')
-
-        time_bs = time.time()
-
-        if len(_cps) == 0:
-            _images = [(0, _og_image_width)]
-        else:
-            _images = []
-            _temp = 0
-            _cps = sorted(_cps)
-            for _cp in _cps:
-                _images.append((_temp, _cp))
-                _temp = _cp
-            _images.append((_temp, _og_image_width))
-
-        for (_img_start, _img_end) in _images:
-
-            _cwp = _img_start
-
-            _img_width = _img_end - _img_start
-            _img_data = _data[:, _img_start:_img_end]
-
-            _window_height = _og_image_height
-            _window_width = _img_width if (window_width == 0 or window_width > _img_width) else window_width
-            _affected_height = _og_image_height
-            _affected_width = _img_width if (affected_width == 0 or affected_width > _img_width) else (
-                affected_width if affected_width <= _window_width else _window_width)
-
-            _data_minus_avg = (_img_data - np.average(_img_data, 1).reshape(_img_data.shape[0], 1))
-            _sdevs = [(index, std) for (index, std) in enumerate(np.std(_data_minus_avg, 0))]
-
-            _half = max((_window_width - _affected_width) // 2, 0)
-            _division_fix = _half + _half != max(_img_width - _affected_width, 0)
-            _max_amount = max(1, int(amount * _img_width))
-
-            # calc initial set of used columns
-            _window_sdevs = [sdev for sdev in _sdevs[:_half]]
-            _sorted_sdevs = sorted(_window_sdevs, key=lambda y: y[1])
-            _bg_used_sdevs = SortedList(_sorted_sdevs, key=lambda y: y[1])
-
-            while _cwp <= _img_end:
-
-                _affected_left = _cwp
-                _affected_right = min(_affected_left + _affected_width, _img_end)
-                _window_left = max(_affected_left - _half if _division_fix else _affected_left - _half, _img_start)
-                _window_right = min(_affected_right + _half, _img_end)
-
-                # print(f'{_window_left}:{_affected_left}:{_affected_right}:{_window_right}')
-
-                for sdev in _sdevs[max(_window_left - _affected_width, 0) - _img_start:_window_left - _img_start]:
-                    _bg_used_sdevs.discard(sdev)
-
-                if _window_right <= _img_end:
-                    _bg_used_sdevs.update(
-                        _sdevs[_window_right - _affected_width - _img_start:_window_right - _img_start])
-
-                # calc current background
-                _current_background = np.average(_img_data[:, [sdev[0] for sdev in _bg_used_sdevs[:_max_amount]]], 1)
-                for sdev in _bg_used_sdevs[:_max_amount]:
-                    _min_sdevs[:, sdev[0] + _img_start] += 1
-                _bg[:, _affected_left:_affected_right] = np.repeat(_current_background.reshape(_bg.shape[0], 1),
-                                                                   (_affected_right - _affected_left), axis=1)
-
-                _cwp += _affected_width
-
-        _sbg = np.ma.subtract(_out, _bg)
-        #print(f'time needed for background subtraction: {time.time() - time_bs}')
-
-        return self._with_data(_sbg), self._with_data(_bg), self._with_data(_min_sdevs), _cps
-
-    def estimate_change_points(self, window_width=100, max_length_single_segment=20000, segment_width=10000):
-        """Estimates the change points of the spectrogramm and returns the indices."""
-
-        avgs = np.average(self.data, axis=0)
-        penalty = np.log(len(avgs)) * 8 * np.std(avgs) ** 2
-        changepoints = set()
-
-        if len(avgs) > max_length_single_segment:
-            num = len(avgs) // (segment_width - window_width*2)
-            segments = [(x, x + segment_width) for x in np.multiply(range(0, num), (segment_width - window_width*2))]
-            segments.append((len(avgs) - segment_width, len(avgs)))
-        else:
-            segments = [(0, len(avgs))]
-
-        if (len(segments)) > 3:
-            m = 'mahalanobis'
-        else:
-            m = 'rbf'
-
-        for start, end in segments:
-            mod = rpt.Window(model=m, width=window_width).fit(avgs[start:end])
-            res = np.array(mod.predict(pen=penalty)[:-1]) + start
-            #print(f'{start} {end} | {res}')
-            changepoints.update(res)
-        return sorted(changepoints)
-
-    def mask_single_freq_rfi(self, threshold=17, row_window_height=3):
-        """Detects rfi in single frequencies and masks the data
-
-        Parameters
-        ----------
-        threshold : Num
-            Minimal Intensity difference between the row and the mean of the surrounding rows to be flagged as rfi.
-        row_window_height : int
-            The amount of rows before and after should be considered for the surrounding rows.
-        """
-
-        rfi_mask = np.full(self.shape, False)
-
-        for row_index in range(self.shape[0]):
-            aff_row = self.data[row_index]
-            rows_before = self.data[max(row_index - row_window_height, 0):row_index]
-            rows_after = self.data[row_index + 1:min(row_index + 1 + row_window_height, self.shape[0])]
-            window_rows = np.concatenate([rows_before, rows_after], axis=0)
-
-            window_mean = np.mean(window_rows, axis=0)
-            diff = abs(aff_row - window_mean)
-
-            rfi_mask[row_index, np.where(diff >= threshold)] = True
-
-        new_data = self.data.copy()
-        new_data.mask[np.where(rfi_mask)] = True
-        new_data.data[np.where(rfi_mask)] = self.MISSING_VALUE
-
-        return self._with_data(new_data)
-
-    @classmethod
-    def is_datasource_for(cls, header):
-        """Check if class supports data from the given FITS file.
-
-        Parameters
-        ----------
-        header : `~astropy.io.fits.Header`
-            main header of the FITS file
-        """
-        return header.get('instrume', '').strip() in cls.INSTRUMENTS
-
-    def remove_border(self):
-        """Remove duplicate entries on the borders."""
-        left = 0
-        while self.freq_axis[left] == self.freq_axis[0]:
-            left += 1
-        right = self.shape[0] - 1
-        while self.freq_axis[right] == self.freq_axis[-1]:
-            right -= 1
-        return self[left-1:right+2, :]
-
-    def mark_border(self):
-        """Mark duplicate entries on the borders."""
-        left = 1
-        while self.freq_axis[left] == self.freq_axis[0]:
-            left += 1
-        right = self.data.shape[0] - 1
-        while self.freq_axis[right] == self.freq_axis[-1]:
-            right -= 1
-
-        c_left = left - 1
-        c_right = right + 2
-
-        if c_left > 0:
-            self.data.data[:c_left, :] = self.MISSING_VALUE
-            self.data.mask[:c_left, :] = True
-        if c_right < (len(self.freq_axis)-1):
-            self.data.data[c_right:, :] = self.MISSING_VALUE
-            self.data.mask[c_right:, :] = True
 
     def _overlap(self, other):
         """ Find frequency and time overlap of two spectrograms. """
@@ -1087,35 +621,41 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 two * np.polyval(f1, two.freq_axis)[:, np.newaxis] +
                 np.polyval(f2, two.freq_axis)[:, np.newaxis])
 
-    def adjust_header(self, DATE_OBS = None, TIME_OBS = None, DATE_END = None, TIME_END = None):
-        # data header
-        new_header = self.get_header()
-        
-        if DATE_OBS is not None:
-            new_header['DATE-OBS'] = DATE_OBS
-        if TIME_OBS is not None:
-            new_header['TIME-OBS'] = TIME_OBS
-        if DATE_END is not None:
-            new_header['DATE-END'] = DATE_END
-        if TIME_END is not None:
-            new_header['TIME-END'] = TIME_END
+    def extend(self, minutes=15, **kwargs):
+        """Requests subsequent files from the server. If minutes is negative,
+        retrieve preceding files. """
+        if len(self.instruments) != 1:
+            raise ValueError
 
-        data_min = np.amin(self.data)
-        data_max = np.amax(self.data)
-        
-        new_header['DATAMIN'] = int(data_min) if not np.isnan(data_min) else 0
-        new_header['DATAMAX'] = int(data_max) if not np.isnan(data_max) else 0
+        instrument = next(iter(self.instruments))
+        if minutes > 0:
+            data = CallistoSpectrogram.from_range(
+                instrument,
+                self.end, self.end + datetime.timedelta(minutes=minutes)
+            )
+        else:
+            data = CallistoSpectrogram.from_range(
+                instrument,
+                self.start - datetime.timedelta(minutes=-minutes), self.start
+            )
 
-        self.header = new_header
+        data = data.clip_freq(self.freq_axis[-1], self.freq_axis[0])
+        return CallistoSpectrogram.join_many([self, data], **kwargs)
 
-        # axes header
-        new_axes_header = self.axes_header
+    @classmethod
+    def from_url(cls, url):
+        """Returns CallistoSpectrogram read from URL.
 
-        new_axes_header['NAXIS1'] = int(new_axes_header['BITPIX']) * (len(self.time_axis) + len(self.freq_axis))
-        new_axes_header['TFORM1'] = str(len(self.time_axis)) + "D8.3"
-        new_axes_header['TFORM2'] = str(len(self.freq_axis)) + "D8.3"
+        Parameters
+        ----------
+        url : str
+            URL to retrieve the data from
 
-        self.axes_header = new_axes_header
+        Returns
+        -------
+        newSpectrogram : `radiospectra.CallistoSpectrogram`
+        """
+        return cls.read(url)
 
 
 CallistoSpectrogram._create.add(

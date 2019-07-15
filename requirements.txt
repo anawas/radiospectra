@@ -7,6 +7,3 @@ pytest
 # Docs
 sphinx
 sunpy_sphinx_theme
-sortedcontainers
-ruptures
-bs4
