@@ -1,35 +1,38 @@
 # -*- coding: utf-8 -*-
-# Author: Florian Mayer <florian.mayer@bitsrc.org>
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import, division, print_function
 
 import datetime
 from collections import defaultdict
 from typing import Union, List
 import time
 
-import numpy as np
 import os
 import ntpath
+from distutils.version import LooseVersion
+
+import numpy as np
 from bs4 import BeautifulSoup
-from scipy.optimize import leastsq
 from scipy.ndimage import gaussian_filter1d
 from sortedcontainers import SortedList
 import ruptures as rpt
 
 from astropy.io import fits
 from astropy.nddata.ccddata import CCDData
+from scipy.optimize import leastsq
 
+from sunpy import __version__
 from sunpy.time import parse_time
-from sunpy.util import minimal_pairs
-from sunpy.util.cond_dispatch import ConditionalDispatch, run_cls
 from sunpy.util.net import download_file
-from sunpy.extern.six.moves import urllib
-from sunpy.extern.six import next, itervalues
 
-from ..spectrogram import LinearTimeSpectrogram, REFERENCE, _union
+from radiospectra.extern.six import itervalues, next
+from radiospectra.extern.six.moves import urllib
+from radiospectra.spectrogram import REFERENCE, LinearTimeSpectrogram, _union
+from radiospectra.util import ConditionalDispatch, run_cls, minimal_pairs
 
 __all__ = ['CallistoSpectrogram']
 
+
+SUNPY_LT_1 = LooseVersion(__version__) < LooseVersion('1.0')
 TIME_STR = "%Y%m%d%H%M%S"
 DEFAULT_URL = 'http://soleil.i4ds.ch/solarradio/data/2002-20yy_Callisto/'
 _DAY = datetime.timedelta(days=1)
@@ -57,7 +60,8 @@ PARSERS = [
 
 
 def query(start, end, instruments=None, url=DEFAULT_URL):
-    """Get URLs for callisto data from instruments between start and end.
+    """
+    Get URLs for callisto data from instruments between start and end.
 
     Parameters
     ----------
@@ -99,7 +103,8 @@ def query(start, end, instruments=None, url=DEFAULT_URL):
 
 
 def download(urls, directory):
-    """Download files from urls into directory.
+    """
+    Download files from urls into directory.
 
     Parameters
     ----------
@@ -112,15 +117,23 @@ def download(urls, directory):
 
 
 def _parse_header_time(date, time):
-    """Returns `~datetime.datetime` object from date and time fields of
-    header. """
+    """
+    Returns `~datetime.datetime` object from date and time fields of header.
+    """
     if time is not None:
         date = date + 'T' + time
-    return parse_time(date)
+
+    if SUNPY_LT_1:
+        time = parse_time(date)
+    else:
+        time = parse_time(date).datetime
+
+    return time
 
 
 class CallistoSpectrogram(LinearTimeSpectrogram):
-    """ Class used for dynamic spectra coming from the Callisto network.
+    """
+    Class used for dynamic spectra coming from the Callisto network.
 
     Attributes
     ----------
@@ -265,7 +278,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             freq_axis = \
                 np.linspace(0, data.shape[0] - 1) * f_delt + f_init  # pylint: disable=E1101
 
-        """Remove duplicate entries on the borders."""
+        # Remove duplicate entries on the borders
         left = 1
         while freq_axis[left] == freq_axis[0]:
             left += 1
@@ -282,6 +295,13 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         if c_right < (len(freq_axis)-1):
             data.data[c_right:, :] = cls.MISSING_VALUE
             data.mask[c_right:, :] = True
+
+        # mask the zigzag pattern
+        zigzag = [*range(255), *range(255)]
+        for row_index in range(data.shape[0]):
+            if np.array_equal(data[row_index, :len(zigzag)], zigzag):
+                data.data[row_index] = np.nan
+                data.mask[row_index] = True
 
         content = header["CONTENT"]
         instruments = {header["INSTRUME"]}
@@ -346,8 +366,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         }
 
         kw.update(kwargs)
-        start = parse_time(start)
-        end = parse_time(end)
+        if SUNPY_LT_1:
+            start = parse_time(start)
+            end = parse_time(end)
+        else:
+            start = parse_time(start).datetime
+            end = parse_time(end).datetime
         urls = query(start, end, [instrument])
         specs = list(map(cls.from_url, urls))
 
@@ -479,19 +503,19 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             return specs[0]
 
        # sorts specs
-        specs = sorted(specs,key = lambda x:x.start)
-        
+        specs = sorted(specs, key=lambda x: x.start)
+
         # initiates combine_polerations
         if polarisations:
-            PWM_VAL_List = set(map(lambda x: x.header['PWM_VAL'], specs))
-            Sorting_dict = dict(map(lambda x: (x,[]), PWM_VAL_List))
+            pwm_val_list = set(map(lambda x: x.header['PWM_VAL'], specs))
+            sorting_dict = dict(map(lambda x: (x,[]), pwm_val_list))
             for spec in specs:
-                Sorting_dict[spec.header['PWM_VAL']].append(spec)
-            map(lambda x: x.start, list(Sorting_dict.values()))
+                sorting_dict[spec.header['PWM_VAL']].append(spec)
+            map(lambda x: x.start, list(sorting_dict.values()))
             new_specs = []
-            for PWM, specs in Sorting_dict.items():
+            for PWM, specs in sorting_dict.items():
                 for index, spec1 in enumerate(specs[:-1]):
-                    spec2 = specs[index+1]
+                    spec2 = specs[index + 1]
                     delta1 = float(spec1.header['CDELT1'])
                     delta2 = float(spec1.header['CDELT1'])
                     if abs(delta1 - delta2) > 0.000001:
@@ -512,30 +536,30 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                     if not np.array_equal(spec1.time_axis, spec2.time_axis):
                         new_specs.append(spec1)
                         continue
-                    merged_spec = CallistoSpectrogram.combine_polarisation(specs[index],specs[index+1])
+                    merged_spec = CallistoSpectrogram.combine_polarisation(specs[index], specs[index + 1])
                     new_specs.append(merged_spec)
             specs = new_specs
-        if not polarisations:
-            PWM_VAL_List = set(map(lambda x: "{}_{}".format(x.header['PWM_VAL'],x.filename.split('.')[0].split('_')[-1]), specs))
-            Sorting_dict = dict(map(lambda x: (x,[]), PWM_VAL_List))
+        else:
+            pwm_val_list = set(map(lambda x: "{}_{}".format(x.header['PWM_VAL'], x.filename.split('.')[0].split('_')[-1]), specs))
+            sorting_dict = dict(map(lambda x: (x, []), pwm_val_list))
             for spec in specs:
-                Sorting_dict["{}_{}".format(spec.header['PWM_VAL'],spec.filename.split('.')[0].split('_')[-1])].append(spec)
-            map(lambda x: x.start, list(Sorting_dict.values()))
+                sorting_dict["{}_{}".format(spec.header['PWM_VAL'], spec.filename.split('.')[0].split('_')[-1])].append(spec)
+            map(lambda x: x.start, list(sorting_dict.values()))
 
         if len(specs) == 1:
             return specs[0]
 
         joined_spec_list = []
-        for PWM, specs in Sorting_dict.items():
-            if not isinstance(specs[0], CallistoSpectrogram):
+        for PWM, sorted_specs in sorting_dict.items():
+            if not isinstance(sorted_specs[0], CallistoSpectrogram):
                 raise ValueError("Can only combine CallistoSpectrogram's.")
-            instr = specs[0].header['INSTRUME']
-            delta = specs[0].header['CDELT1']
+            instr = sorted_specs[0].header['INSTRUME']
+            delta = sorted_specs[0].header['CDELT1']
 
-            first_time_point = specs[0].start + datetime.timedelta(seconds=specs[0].time_axis[0])
-            last_time_point = specs[0].start + datetime.timedelta(seconds=specs[0].time_axis[-1])
+            first_time_point = sorted_specs[0].start + datetime.timedelta(seconds=sorted_specs[0].time_axis[0])
+            last_time_point = sorted_specs[0].start + datetime.timedelta(seconds=sorted_specs[0].time_axis[-1])
 
-            for spec in specs[1:]:
+            for spec in sorted_specs[1:]:
                 if not isinstance(spec, CallistoSpectrogram):
                     raise ValueError("Can only combine CallistoSpectrogram's.")
                 if spec.header['INSTRUME'] != instr:
@@ -551,15 +575,15 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 if cur_end > last_time_point:
                     last_time_point = cur_end
 
-            new_header = specs[0].get_header()
-            new_axes_header = specs[0].axes_header
+            new_header = sorted_specs[0].get_header()
+            new_axes_header = sorted_specs[0].axes_header
 
-            borderless_specs = [sp.remove_border() for sp in specs]
+            borderless_specs = [sp.mark_border() for sp in sorted_specs]
 
             new_freq_axis = np.array(sorted(_union(set(sp.freq_axis) for sp in borderless_specs), key=lambda y: -y))
             new_time_axis = np.arange(0, (last_time_point-first_time_point).total_seconds() + 0.00001, delta)
 
-            for spec in specs:
+            for spec in sorted_specs:
                 curr_start = spec.start + datetime.timedelta(seconds=spec.time_axis[0])
                 diff = (curr_start - first_time_point).total_seconds()
                 diff_index = int(diff / delta)
@@ -593,8 +617,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                             new_data[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data[pos_freq, :]
                             new_data.mask[new_pos_freq, new_pos_time:new_pos_time + sp.shape[1]] = sp.data.mask[pos_freq, :]
 
-            time = first_time_point.time()
-            second_of_day = time.hour * 3600 + time.minute * 60 + time.second
+            ftp_time = first_time_point.time()
+            second_of_day = ftp_time.hour * 3600 + ftp_time.minute * 60 + ftp_time.second
 
             params = {
                 'time_axis': new_time_axis,
@@ -603,18 +627,19 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 'end': last_time_point,
                 't_delt': delta,
                 't_init': second_of_day,
-                't_label': specs[0].t_label,
-                'f_label': specs[0].f_label,
-                'content': specs[0].content,
-                'instruments': _union(spec.instruments for spec in specs),
+                't_label': sorted_specs[0].t_label,
+                'f_label': sorted_specs[0].f_label,
+                'content': sorted_specs[0].content,
+                'instruments': _union(spec.instruments for spec in sorted_specs),
+                'filename': f'JOINED_{sorted_specs[0].filename}'
             }
 
-            new_header['DATE-OBS'] = min([x.get_header()['DATE-OBS'] for x in specs])
-            new_header['TIME-OBS'] = min([x.get_header()['TIME-OBS'] for x in specs])
-            new_header['DATE-END'] = max([x.get_header()['DATE-END'] for x in specs])
-            new_header['TIME-END'] = max([x.get_header()['TIME-END'] for x in specs])
-            new_header['DATAMIN'] = min([x.get_header()['DATAMIN'] for x in specs])
-            new_header['DATAMAX'] = max([x.get_header()['DATAMAX'] for x in specs])
+            new_header['DATE-OBS'] = min([x.get_header()['DATE-OBS'] for x in sorted_specs])
+            new_header['TIME-OBS'] = min([x.get_header()['TIME-OBS'] for x in sorted_specs])
+            new_header['DATE-END'] = max([x.get_header()['DATE-END'] for x in sorted_specs])
+            new_header['TIME-END'] = max([x.get_header()['TIME-END'] for x in sorted_specs])
+            new_header['DATAMIN'] = min([x.get_header()['DATAMIN'] for x in sorted_specs])
+            new_header['DATAMAX'] = max([x.get_header()['DATAMAX'] for x in sorted_specs])
             new_header['CRVAL1'] = second_of_day
             new_header['CRVAL2'] = len(new_freq_axis)
 
@@ -625,7 +650,11 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             joined_spec = CallistoSpectrogram(new_data, header=new_header, axes_header=new_axes_header, **params)
             joined_spec.adjust_header()
             joined_spec_list.append(joined_spec)
-        return joined_spec_list
+
+        if len(joined_spec_list) == 1:
+            return joined_spec_list[0]
+        else:
+            return joined_spec_list
 
     def save(self, filepath: str):
         """ Save modified spectrogram back to filepath.
@@ -860,7 +889,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             changepoints.update(res)
         return sorted(changepoints)
 
-    def mask_single_freq_rfi(self, threshold=17, row_window_height=3):
+    def remove_single_freq_rfi(self, threshold=17, row_window_height=3):
         """Detects rfi in single frequencies and masks the data
 
         Parameters
@@ -930,15 +959,21 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             self.data.data[c_right:, :] = self.MISSING_VALUE
             self.data.mask[c_right:, :] = True
 
+        return self
+
     def _overlap(self, other):
-        """ Find frequency and time overlap of two spectrograms. """
+        """
+        Find frequency and time overlap of two spectrograms.
+        """
         one, two = self.intersect_time([self, other])
         ovl = one.freq_overlap(two)
         return one.clip_freq(*ovl), two.clip_freq(*ovl)
 
     @staticmethod
     def _to_minimize(a, b):
-        """Function to be minimized for matching to frequency channels."""
+        """
+        Function to be minimized for matching to frequency channels.
+        """
         def _fun(p):
             if p[0] <= 0.2 or abs(p[1]) >= a.max():
                 return float("inf")
@@ -947,8 +982,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
     def _homogenize_params(self, other, maxdiff=1):
         """
-        Return triple with a tuple of indices (in self and other, respectively),
-        factors and constants at these frequencies.
+        Return triple with a tuple of indices (in self and other,
+        respectively), factors and constants at these frequencies.
 
         Parameters
         ----------
@@ -987,11 +1022,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         return pairs_indices, factors, constants
 
     def homogenize(self, other, maxdiff=1):
-        """ Return overlapping part of self and other as (self, other) tuple.
+        """
+        Return overlapping part of self and other as (self, other) tuple.
         Homogenize intensities so that the images can be used with
-        combine_frequencies. Note that this works best when most of the
-        picture is signal, so use :py:meth:`in_interval` to select the subset
-        of your image before applying this method.
+        combine_frequencies. Note that this works best when most of the picture
+        is signal, so use :py:meth:`in_interval` to select the subset of your
+        image before applying this method.
 
         Parameters
         ----------

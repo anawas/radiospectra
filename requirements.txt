@@ -1,6 +1,6 @@
-sunpy>=0.8.0
+sunpy>=1.0.2
 numpy>=1.11
-astropy>=2.0.3
+astropy>=3.2.1
 scipy
 # Dev
 pytest
