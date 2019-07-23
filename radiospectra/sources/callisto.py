@@ -513,9 +513,9 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 sorting_dict[spec.header['PWM_VAL']].append(spec)
             map(lambda x: x.start, list(sorting_dict.values()))
             new_specs = []
-            for PWM, specs in sorting_dict.items():
-                for index, spec1 in enumerate(specs[:-1]):
-                    spec2 = specs[index + 1]
+            for PWM, specs_list in sorting_dict.items():
+                for index, spec1 in enumerate(specs_list[:-1]):
+                    spec2 = specs_list[index + 1]
                     delta1 = float(spec1.header['CDELT1'])
                     delta2 = float(spec1.header['CDELT1'])
                     if abs(delta1 - delta2) > 0.000001:
