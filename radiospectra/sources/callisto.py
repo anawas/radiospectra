@@ -508,7 +508,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
        # sorts specs
         specs = sorted(specs, key=lambda x: x.start)
 
-        # initiates combine_polerations
+        # initiates combine_polarisations or gives separated spectrograms back
         if polarisations:
             sorting_dict = cls.detect_and_combine_polarisations(specs)
         else:
@@ -699,13 +699,24 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
     @classmethod
     def detect_and_combine_polarisations(cls, specs: ['CallistoSpectrogram']) -> ['CallistoSpectrogram']:
+        """Takes a list of spectrogram and evaluates and processes all polarisations
+
+        Parameters
+        ----------
+        specs: A list of spectrogram
+        return: A dictionary of all spectrogram sorted by there PWM_VAL and lists for all combined polarisations
+        """
         pwm_val_list = set(map(lambda x: x.header['PWM_VAL'], specs))
-        pre_sorted_dict = dict(map(lambda x: (x, []), pwm_val_list))
+        sorted_work_dict = dict(map(lambda x: (x, []), pwm_val_list))
+        pwm_val_list = set(map(lambda x: "{}_{}".format(x.header['PWM_VAL'], x.filename.split('.')[0].split('_')[-1]), specs))
         sorting_dict = dict(map(lambda x: (x, []), pwm_val_list))
+        pol_val_list = set(map(lambda x: "{}_{}".format(x.header['PWM_VAL'], "Pol"), specs))
+        sorting_dict.update(map(lambda x: (x, []), pol_val_list))
         for spec in specs:
-            pre_sorted_dict[spec.header['PWM_VAL']].append(spec)
-        map(lambda x: x.start, list(pre_sorted_dict.values()))
-        for PWM, specs_list in pre_sorted_dict.items():
+            sorting_dict["{}_{}".format(spec.header['PWM_VAL'], spec.filename.split('.')[0].split('_')[-1])].append(spec)
+            sorted_work_dict[spec.header['PWM_VAL']].append(spec)
+        map(lambda x: x.start, list(sorting_dict.values()))
+        for PWM, specs_list in sorted_work_dict.items():
             for index, spec1 in enumerate(specs_list[:-1]):
                 spec2 = specs_list[index + 1]
                 delta1 = float(spec1.header['CDELT1'])
@@ -723,8 +734,10 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 if not np.array_equal(spec1.time_axis, spec2.time_axis):
                     continue
                 merged_spec = CallistoSpectrogram.combine_polarisation(specs[index], specs[index + 1])
-                sorting_dict[merged_spec.header['PWM_VAL']].append(merged_spec)
+                print("yes")
+                sorting_dict["{}_{}".format(merged_spec.header['PWM_VAL'], "Pol")].append(merged_spec)
         return sorting_dict
+
 
     @classmethod
     def combine_polarisation(cls, spec1: 'CallistoSpectrogram', spec2: 'CallistoSpectrogram') -> 'CallistoSpectrogram':
