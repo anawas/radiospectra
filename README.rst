@@ -22,9 +22,9 @@ Requirements
 This comes on top of SunPy.
 You need ruptures to make this work.
 
-Contacts
+Authors
 --------
+ 
 
-Authors: 
 
 
