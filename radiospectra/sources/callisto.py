@@ -732,7 +732,6 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 if not np.array_equal(spec1.time_axis, spec2.time_axis):
                     continue
                 merged_spec = CallistoSpectrogram.combine_polarisation(specs[index], specs[index + 1])
-                print("yes")
                 sorting_dict["{}_{}".format(merged_spec.header['PWM_VAL'], "Pol")].append(merged_spec)
         return sorting_dict
 
