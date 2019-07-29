@@ -24,8 +24,6 @@ from sunpy import __version__
 from sunpy.time import parse_time
 from sunpy.util.net import download_file
 
-import sys
-sys.path.insert(1,'C:\\Users\\David Sommer\\Documents\\GitHub\\radiospectra')
 from radiospectra.extern.six import itervalues, next
 from radiospectra.extern.six.moves import urllib
 from radiospectra.spectrogram import REFERENCE, LinearTimeSpectrogram, _union
