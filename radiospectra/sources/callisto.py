@@ -733,6 +733,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                     continue
                 merged_spec = CallistoSpectrogram.combine_polarisation(specs[index], specs[index + 1])
                 sorting_dict["{}_{}".format(merged_spec.header['PWM_VAL'], "Pol")].append(merged_spec)
+        del_list = []
+        for PWM, specs_list in sorting_dict.items():
+            if not specs_list:
+                del_list.append(PWM)
+        for val in del_list:
+            del sorting_dict[val]
         return sorting_dict
 
 
