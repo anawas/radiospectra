@@ -701,8 +701,10 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
         Parameters
         ----------
-        specs: A list of spectrograms
-        return: A dictionary of all spectrograms sorted by there PWM_VAL and lists for all combined polarisations
+        specs:
+            A list of spectrograms
+        return:
+            A dictionary of all spectrograms sorted by there PWM_VAL and lists for all combined polarisations
         """
         pwm_val_list = set(map(lambda x: x.header['PWM_VAL'], specs))
         sorted_work_dict = dict(map(lambda x: (x, []), pwm_val_list))
