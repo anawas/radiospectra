@@ -249,6 +249,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         return header
 
     @classmethod
+
     def read(cls, filename: str, **kwargs):
         """
         Reads in FITS file and return a new CallistoSpectrogram.
@@ -636,40 +637,9 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         # sorts specs
         specs = sorted(specs, key=lambda x: x.start)
 
-        # initiates combine_polarisations
+        # initiates combine_polarisations or gives separated spectrograms back
         if polarisations:
-            pwm_val_list = set(map(lambda x: x.header['PWM_VAL'], specs))
-            sorting_dict = dict(map(lambda x: (x,[]), pwm_val_list))
-            for spec in specs:
-                sorting_dict[spec.header['PWM_VAL']].append(spec)
-            map(lambda x: x.start, list(sorting_dict.values()))
-            new_specs = []
-            for PWM, specs_list in sorting_dict.items():
-                for index, spec1 in enumerate(specs_list[:-1]):
-                    spec2 = specs_list[index + 1]
-                    delta1 = float(spec1.header['CDELT1'])
-                    delta2 = float(spec1.header['CDELT1'])
-                    if abs(delta1 - delta2) > 0.000001:
-                        new_specs.append(spec1)
-                        continue
-                    if spec1.header['INSTRUME'] != spec2.header['INSTRUME']:
-                        new_specs.append(spec1)
-                        continue
-                    if spec1.shape != spec2.shape:
-                        new_specs.append(spec1)
-                        continue
-                    if abs((spec1.start - spec2.start).total_seconds()) > delta1:
-                        new_specs.append(spec1)
-                        continue
-                    if not np.array_equal(spec1.freq_axis, spec2.freq_axis):
-                        new_specs.append(spec1)
-                        continue
-                    if not np.array_equal(spec1.time_axis, spec2.time_axis):
-                        new_specs.append(spec1)
-                        continue
-                    merged_spec = CallistoSpectrogram.combine_polarisation(specs[index], specs[index + 1])
-                    new_specs.append(merged_spec)
-            specs = new_specs
+            sorting_dict = cls.detect_and_combine_polarisations(specs)
         else:
             pwm_val_list = set(map(lambda x: "{}_{}".format(x.header['PWM_VAL'], x.filename.split('.')[0].split('_')[-1]), specs))
             sorting_dict = dict(map(lambda x: (x, []), pwm_val_list))
@@ -791,7 +761,51 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
     @classmethod
     def detect_and_combine_polarisations(cls, specs: ['CallistoSpectrogram']) -> ['CallistoSpectrogram']:
-        raise NotImplementedError('detect_and_combine_polarisations not yet implemented')
+        """Takes a list of spectrogram and evaluates and processes all polarisations
+
+        Parameters
+        ----------
+        specs:
+            A list of spectrograms
+        return:
+            A dictionary of all spectrograms sorted by there PWM_VAL and lists for all combined polarisations
+        """
+        pwm_val_list = set(map(lambda x: x.header['PWM_VAL'], specs))
+        sorted_work_dict = dict(map(lambda x: (x, []), pwm_val_list))
+        pwm_val_list = set(map(lambda x: "{}_{}".format(x.header['PWM_VAL'], x.filename.split('.')[0].split('_')[-1]), specs))
+        sorting_dict = dict(map(lambda x: (x, []), pwm_val_list))
+        pol_val_list = set(map(lambda x: "{}_{}".format(x.header['PWM_VAL'], "Pol"), specs))
+        sorting_dict.update(map(lambda x: (x, []), pol_val_list))
+        for spec in specs:
+            sorting_dict["{}_{}".format(spec.header['PWM_VAL'], spec.filename.split('.')[0].split('_')[-1])].append(spec)
+            sorted_work_dict[spec.header['PWM_VAL']].append(spec)
+        map(lambda x: x.start, list(sorting_dict.values()))
+        for PWM, specs_list in sorted_work_dict.items():
+            for index, spec1 in enumerate(specs_list[:-1]):
+                spec2 = specs_list[index + 1]
+                delta1 = float(spec1.header['CDELT1'])
+                delta2 = float(spec1.header['CDELT1'])
+                if abs(delta1 - delta2) > 0.000001:
+                    continue
+                if spec1.header['INSTRUME'] != spec2.header['INSTRUME']:
+                    continue
+                if spec1.shape != spec2.shape:
+                    continue
+                if abs((spec1.start - spec2.start).total_seconds()) > delta1:
+                    continue
+                if not np.array_equal(spec1.freq_axis, spec2.freq_axis):
+                    continue
+                if not np.array_equal(spec1.time_axis, spec2.time_axis):
+                    continue
+                merged_spec = CallistoSpectrogram.combine_polarisation(specs[index], specs[index + 1])
+                sorting_dict["{}_{}".format(merged_spec.header['PWM_VAL'], "Pol")].append(merged_spec)
+        del_list = []
+        for PWM, specs_list in sorting_dict.items():
+            if not specs_list:
+                del_list.append(PWM)
+        for val in del_list:
+            del sorting_dict[val]
+        return sorting_dict
 
 
     @classmethod
@@ -1021,7 +1035,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
         data_min = np.amin(self.data)
         data_max = np.amax(self.data)
-        
+
         new_header['DATAMIN'] = int(data_min) if not np.isnan(data_min) else 0
         new_header['DATAMAX'] = int(data_max) if not np.isnan(data_max) else 0
 
