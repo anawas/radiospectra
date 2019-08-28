@@ -253,6 +253,7 @@ def e_Callisto_exceptionSeeker(row_num, dataframe, new_frame, exceptions_fr, fol
     """
     Returns new_frame and exceptions_fr also download the files of the new frame
     """
+
     try:
 
         instrument, year, start, end = range_Generator(row_num, dataframe)
@@ -376,7 +377,7 @@ def e_Callisto_Burst_simplifier(dataframe, folder, sort=False):
 # Peek a flare from Callisto Database
 def Callisto_flare(row_num, dataframe, show_url=False):
     """
-    Peek a flare from a row of a given dataframe
+    Peek a flare from the online server with info from df
     """
 
     row = dataframe.loc[row_num]
@@ -399,13 +400,7 @@ def Callisto_flare(row_num, dataframe, show_url=False):
 
 def Callisto_simple_flare(index, dataframe):
     """
-    Peeks a spectrogram
-
-    Args:
-        index: position of the elem in the dataframe
-        dataframe: pandas dataframe
-    Returns:
-        Callistopectrogram obejct
+    Peeks a spectrogram from df using "loc"
     """
     Spectra = CallistoSpectrogram.read(dataframe.loc[index]['remarks'])
     Spectra.peek()
@@ -413,14 +408,9 @@ def Callisto_simple_flare(index, dataframe):
 
 def Callisto_simple_iflare(index, dataframe):
     """
-    Peeks a spectrogram
-
-    Args:
-        index: INDEX of the elem in the dataframe
-        dataframe: pandas dataframe
-    Returns:
-        Callistopectrogram obejct
+    Peeks a spectrogram from df using "iloc"
     """
+
     Spectra = CallistoSpectrogram.read(dataframe.iloc[index]['remarks'])
     Spectra.peek()
     return Spectra
@@ -428,12 +418,8 @@ def Callisto_simple_iflare(index, dataframe):
 def preview(dataframe, show_details = True):
     """
     Show a preview of a whole dataframe, to limit the amount of examples, slice the dataframe
-      Args:
-          dataframe: pandas dataframe
-          show_details: Boolean, if true shows information about the flare
-      Returns:
-          CallistoSpectrogram objects
-      """
+    """
+
     for index, elem in dataframe.iterrows():
         row = dataframe.loc[index]
         instrument, year, start, end = range_Generator(index, dataframe)
