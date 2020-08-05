@@ -1,11 +1,10 @@
 import re
 import os
 import time
-import pandas as pd
-import matplotlib.pyplot as plt
 
+import pandas as pd
 from os.path import relpath
-from astropy.io import fits
+
 from .sources import CallistoSpectrogram
 from .sources.callisto import query
 
@@ -16,28 +15,42 @@ from sunpy.time import parse_time
 def preprocessing_txt(data):
     """
     Preprocessing dataframe with the Callisto Flare Notation
-
-    Args:
-      data: Pandas dataframe
-    Returns:
-      Preprocessed dataframe
     """
+
     data['date'] = data['date'].apply(lambda x: '{0:0>8}'.format(x))
     data['end'] = data['end'].apply(lambda x: '{0:0>6}'.format(x))
     data['start'] = data['start'].apply(lambda x: '{0:0>6}'.format(x))
     data['lower'] = data['lower'].astype(str).map(lambda x: x.rstrip('xX'))
     data['upper'] = data['upper'].astype(str).map(lambda x: x.rstrip('xX'))
-    # Sanity preserver
-    # data['lower'] = data['lower'].astype(str).str.replace('\D-', '')
-    # data['upper'] = data['upper'].astype(str).str.replace('\D+', '')
     data['remarks'] = data['remarks'].astype(str)
+    return data
+
+
+def microseconds_clean(data):
+    """
+    Second step for preprocessing the dataframe
+    """
+
+    for index, elemen in data.iterrows():
+        if data.loc[index]['start'] == '000nan':
+            continue
+
+        string = data.loc[index]['start']
+        new_start = string[0:4] + str(int(float(string[4:6]) * 60))
+        data['start'].at[index] = new_start
+
+        string = data.loc[index]['end']
+        new_start = string[0:4] + str(int(float(string[4:6]) * 60))
+        data['end'].at[index] = new_start
+
     return data
 
 
 def date_cleaner(date):
     """
-    Cleans date string after modifing previos years
+    Cleans date string after modifying previous years
     """
+
     date = str(date)
     long = len(date)-2
     new = ''
@@ -49,13 +62,6 @@ def date_cleaner(date):
 def creator_instrument(lower, upper):
     """
     Generates the aproximated instrument string based in the frequencies, to use directly with CallistoSpectrogram
-
-    Args:
-        Lower: Lower intensity of the flare
-        Upper: Upper intensity of the flare
-
-    Returns:
-        Name of the Instrument based on the frequencies analysed
     """
 
     lower = int(lower)
@@ -68,12 +74,8 @@ def creator_instrument(lower, upper):
 def creator_date(date):
     """
     Creates the date format to use directly with CallistoSpectrogram
-
-    Args:
-        date: date from dataframe
-    Returns:
-        Modified date to use with standard Time Libraries
     """
+
     date = date_cleaner(date)
     date = re.sub(r'((?:(?=(1|.))\2){2})(?!$)', r'\1/', date)
     if int(date[0] + date[1]) > 50:
@@ -86,31 +88,21 @@ def creator_date(date):
 def creator_time(time):
     """
     Creates the time format to use directly with CallistoSpectrogram
-
-    Args:
-        time: time from dataframe
-    Returns:
-        Modified time to use with standard Time Libraries
     """
+
     time = str(time)
-    microT = ':0' + time[5]
-    long = len(time) - 2
+    long = len(time)
     new = ''
     for x in range(long): new = new + time[x]
-    return re.sub(r'((?:(?=(1|.))\2){2})(?!$)', r'\1:', new) + microT
+    return re.sub(r'((?:(?=(1|.))\2){2})(?!$)', r'\1:', new)
 
 
 # Sets the previous methods together
 def range_Generator(row_num, dataframe):
     """
     Generates the required strings to work with CallistoSpectrogram class
-
-    Args:
-        row_num: index of the row
-        dataframe:  pandas dataframe
-    Returns:
-        Modified time to use with standard Time Libraries
     """
+
     row = dataframe.loc[row_num]
     instrument = creator_instrument(row['lower'], row['upper'])
     year = creator_date(row['date'])
@@ -118,49 +110,30 @@ def range_Generator(row_num, dataframe):
     end = creator_time(row['end'])
     return instrument, year, start, end
 
-
-# Peek a flare from Callisto Database
-def Callisto_flare(row_num, dataframe, show_url=False):
+def range_iGenerator(row_num, dataframe):
     """
-    Peek a flare from a row of a given dataframe
+    Generates the required strings to work with CallistoSpectrogram class, uses iloc instead of loc
 
     Args:
         row_num: index of the row
-        dataframe: pandas dataframe
+        dataframe:  pandas dataframe
     Returns:
-        CallistoSpectrogram object
+        Modified time to use with standard Time Libraries
     """
-    row = dataframe.loc[row_num]
-    instrument, year, start, end = range_Generator(row_num, dataframe)
-    print(instrument)
-    print('  ' + row['lower'], row['upper'])
-    print(creator_date(row['date']))
-    print(start)
-    print(end)
-    if show_url:
-        startQ = parse_time(year + ' ' + start)
-        endQ = parse_time(year + ' ' + end)
-        urls = query(startQ, endQ, [instrument])
-        for url in urls:
-            print(url)
-
-    Spectra = CallistoSpectrogram.from_range(instrument, year + ' ' + start, year + ' ' + end)
-    Spectra.peek()
-    return Spectra
+    row = dataframe.iloc[row_num]
+    instrument = creator_instrument(row['lower'], row['upper'])
+    year = creator_date(row['date'])
+    start = creator_time(row['start'])
+    end = creator_time(row['end'])
+    return instrument, year, start, end
 
 
 # Directory methods
 def directorySubtypeGenerator(folder, flareType, subtype):
     """
     Generates Directories based in the subtype and type of flares
-
-    Args:
-        folder: root directory
-        flareType: type of flare from dataframe
-        subtype: subtype of flare from dataframe
-    Returns:
-        path to new flare directory
     """
+
     if os.path.isdir('./{}/{}/{}'.format(folder, flareType, subtype)) == False:
         os.makedirs('./{}/{}/{}'.format(folder, flareType, subtype))
         return os.path.realpath('./{}/{}/{}'.format(folder, flareType, subtype))
@@ -171,13 +144,8 @@ def directorySubtypeGenerator(folder, flareType, subtype):
 def directoryFlaretype(folder, flareType):
     """
     Generates Directories based ONLY in the type of flares
-
-    Args:
-        folder: root directory
-        flareType: type of flare from dataframe
-    Returns:
-        path to new flares directory
     """
+
     if os.path.isdir('./{}/{}'.format(folder, flareType)) == False:
         os.makedirs('./{}/{}'.format(folder, flareType))
         return os.path.realpath('./{}/{}'.format(folder, flareType))
@@ -189,12 +157,6 @@ def directoryFlaretype(folder, flareType):
 def dir_Gen(row_num, dataframe):
     """
     Gets the directory of the data from the remarks column
-
-    Args:
-        row_num: index of the row
-        dataframe: pandas dataframe
-    Returns:
-        directions of files saved in the remarks column
     """
 
     row = dataframe.loc[row_num]
@@ -204,8 +166,53 @@ def dir_Gen(row_num, dataframe):
 
     return directionsList
 
+def dir_iGen(row_num, dataframe):
+    """
+    Gets the directory of the data using the actual position of the flare in the list
+
+    Args:
+        row_num: index of the row
+        dataframe: pandas dataframe
+    Returns:
+        directions of files saved in the remarks column
+    """
+
+    row = dataframe.iloc[row_num]
+    directions = row['remarks']
+
+    directionsList = [x.strip() for x in directions.split(',')[:-1]]
+
+    return directionsList
+
 
 def Callisto_dir_flare(row_num, dataframe, show_details=False, show_urls=False):
+    """
+    Peek a CallistoSpectrogram from a row of the Already Downloaded dataframe
+    """
+
+    if show_details:
+        row = dataframe.loc[row_num]
+        instrument, year, start, end = range_Generator(row_num, dataframe)
+        print(instrument)
+        print('  ' + row['lower'], row['upper'])
+        print(creator_date(row['date']))
+        print(start)
+        print(end)
+
+    if show_urls:
+        startQ = parse_time(year + ' ' + start)
+        endQ = parse_time(year + ' ' + end)
+        urls = query(startQ, endQ, [instrument])
+        for url in urls:
+            print(url)
+
+    Gen = dir_Gen(row_num, dataframe)
+    print("----------------plots----------------")
+    for elem in Gen:
+        CallistoSpectrogram.read(elem).peek()
+    return Gen
+
+def Callisto_idir_flare(row_num, dataframe, show_details=False, show_urls=False):
     """
     Peek a CallistoSpectrogram from a row of the Already Downloaded dataframe
 
@@ -219,7 +226,7 @@ def Callisto_dir_flare(row_num, dataframe, show_details=False, show_urls=False):
 
     """
     if show_details:
-        row = dataframe.loc[row_num]
+        row = dataframe.iloc[row_num]
         instrument, year, start, end = range_Generator(row_num, dataframe)
         print(instrument)
         print('  ' + row['lower'], row['upper'])
@@ -246,6 +253,7 @@ def e_Callisto_exceptionSeeker(row_num, dataframe, new_frame, exceptions_fr, fol
     """
     Returns new_frame and exceptions_fr also download the files of the new frame
     """
+
     try:
 
         instrument, year, start, end = range_Generator(row_num, dataframe)
@@ -281,6 +289,7 @@ def remarks_Cleaners(row_num, dataframe, new_frame, exceptions_fr):
     """
     Cleans remarks column from an already downloaded dataframe
     """
+
     row = dataframe.loc[row_num]
     directions = row['remarks']
 
@@ -292,7 +301,10 @@ def remarks_Cleaners(row_num, dataframe, new_frame, exceptions_fr):
         return new_frame, exceptions_fr
 
 def iter_remarks_Cleaners(data):
-    """Iterates over a dataframe using remarks_Cleaners"""
+    """
+    Iterates over a dataframe using remarks_Cleaners
+    """
+
     clean_directions = pd.DataFrame(columns = data.columns)
     exceptions_frame = pd.DataFrame(columns = data.columns)
     for index, row in data.iterrows():
@@ -304,19 +316,11 @@ def iter_remarks_Cleaners(data):
 def e_Callisto_burst_downloader(data, sort=False, folder="e-Callisto_Flares", exist=False):
     """
     Download a set of burst based on a dataframe with the Callisto-Notation
-
-    Args:
-        data: pandas dataframe
-        sort: Python boolean. If 'True', it creates a subset of folders for the flares subtypes
-        folder: name or path of the folder where the flares will be downloaded
-        exist = Python boolean. If 'True' overwrites the path (if already exist)
-    Returns:
-        rclean: Pandas dataframe. Contains the information of all the already downloaded flares,
-            as well as the paths of their respective FITS files.
-        exceptions_frame: Pandas dataframe. Contains information about files that could not be downloaded
     """
+
     start = time.time()
     data = preprocessing_txt(data)
+    data = microseconds_clean(data)
     os.makedirs('./{}'.format(folder), exist_ok=exist)
     clean_directions = pd.DataFrame(columns=data.columns)
     exceptions_frame = pd.DataFrame(columns=data.columns)
@@ -333,19 +337,24 @@ def e_Callisto_burst_downloader(data, sort=False, folder="e-Callisto_Flares", ex
 #Joining methods
 def e_Callisto_Burst_simplifier(dataframe, folder, sort=False):
     """
-    Returns a new data frame with the direction of the joined data set
+    Joins the slice data into time axis per Flare
     """
+
     start = time.time()
     os.makedirs('./{}'.format(folder))
     joined = pd.DataFrame(columns=dataframe.columns)
+    special = pd.DataFrame(columns=dataframe.columns)
 
     for index, elem in dataframe.iterrows():
 
         directions = dir_Gen(index, dataframe)
         name = os.path.basename(directions[0])
-
-        bursts_here = CallistoSpectrogram.from_files(directions)
-
+        try:
+            bursts_here = CallistoSpectrogram.from_files(directions)
+        except ValueError:
+            print("Damage file found at \n" + str(dataframe.loc[index]))
+            special = special.append(dataframe.loc[index])
+            continue
         row = dataframe.loc[index]
 
         if sort == True:
@@ -361,15 +370,56 @@ def e_Callisto_Burst_simplifier(dataframe, folder, sort=False):
         joined = joined.append(dataframe.loc[index])
         joined.at[index, 'remarks'] = relpath(path)
     end = time.time()
-    print("Joined after----- " + str(end - start) + " secs")
-    return joined
+    print("\nJoined after----- " + str(end - start) + " secs\n")
+    return joined, special
+
+
+# Peek a flare from Callisto Database
+def Callisto_flare(row_num, dataframe, show_url=False):
+    """
+    Peek a flare from the online server with info from df
+    """
+
+    row = dataframe.loc[row_num]
+    instrument, year, start, end = range_Generator(row_num, dataframe)
+    print(instrument)
+    print('  ' + row['lower'], row['upper'])
+    print(creator_date(row['date']))
+    print(start)
+    print(end)
+    if show_url:
+        startQ = parse_time(year + ' ' + start)
+        endQ = parse_time(year + ' ' + end)
+        urls = query(startQ, endQ, [instrument])
+        for url in urls:
+            print(url)
+
+    Spectra = CallistoSpectrogram.from_range(instrument, year + ' ' + start, year + ' ' + end)
+    Spectra.peek()
+    return Spectra
 
 def Callisto_simple_flare(index, dataframe):
+    """
+    Peeks a spectrogram from df using "loc"
+    """
     Spectra = CallistoSpectrogram.read(dataframe.loc[index]['remarks'])
     Spectra.peek()
     return Spectra
 
+def Callisto_simple_iflare(index, dataframe):
+    """
+    Peeks a spectrogram from df using "iloc"
+    """
+
+    Spectra = CallistoSpectrogram.read(dataframe.iloc[index]['remarks'])
+    Spectra.peek()
+    return Spectra
+
 def preview(dataframe, show_details = True):
+    """
+    Show a preview of a whole dataframe, to limit the amount of examples, slice the dataframe
+    """
+
     for index, elem in dataframe.iterrows():
         row = dataframe.loc[index]
         instrument, year, start, end = range_Generator(index, dataframe)
