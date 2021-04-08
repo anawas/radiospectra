@@ -1,3 +1,4 @@
+scikit-image
 sunpy>=1.0.2
 numpy>=1.11
 astropy>=3.2.1

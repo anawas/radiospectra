@@ -11,6 +11,8 @@ from random import randint
 from distutils.version import LooseVersion
 
 import numpy as np
+import skimage
+from skimage import filters
 from matplotlib import pyplot as plt
 from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
@@ -70,6 +72,7 @@ def _list_formatter(lst, fun=None):
     Returns a function that takes x, pos and returns fun(lst[x]) if fun is not
     None, else lst[x] or "" if x is out of range.
     """
+
     def _fun(x, pos):
         x = int(x)
         if x >= len(lst) or x < 0:
@@ -79,6 +82,7 @@ def _list_formatter(lst, fun=None):
         if fun is None:
             return elem
         return fun(elem)
+
     return _fun
 
 
@@ -104,6 +108,7 @@ class _LinearView(object):
         Delta between frequency channels in linearized spectrogram. Defaults to
         (minimum delta / 2.) because of the Shannon sampling theorem.
     """
+
     def __init__(self, arr, delt=None):
         self.arr = arr
         if delt is None:
@@ -203,6 +208,7 @@ class TimeFreq(object):
     freq : `~numpy.ndarray`
         Frequency of the data points in MHz.
     """
+
     def __init__(self, start, time, freq):
         self.start = start
         self.time = time
@@ -234,7 +240,7 @@ class TimeFreq(object):
             FuncFormatter(
                 lambda x, pos: (
                     self.start + datetime.timedelta(seconds=x)
-                    ).strftime(time_fmt)
+                ).strftime(time_fmt)
             )
         )
 
@@ -358,10 +364,10 @@ class Spectrogram(Parent):
 
         params.update({
             'time_axis': self.time_axis[
-                x_range.start:x_range.stop:x_range.step
-            ] - self.time_axis[soffset],
+                         x_range.start:x_range.stop:x_range.step
+                         ] - self.time_axis[soffset],
             'freq_axis': self.freq_axis[
-                y_range.start:y_range.stop:y_range.step],
+                         y_range.start:y_range.stop:y_range.step],
             'start': self.start + datetime.timedelta(
                 seconds=self.time_axis[soffset]),
             'end': self.start + datetime.timedelta(
@@ -688,11 +694,151 @@ class Spectrogram(Parent):
         bg = np.average(self.data[:, realcand], 1)
         return bg.reshape(self.shape[0], 1)
 
-    def subtract_bg(self):
+    def subtract_bg(self, constbacksub=False, elimwrongchannels=False):
         """
-        Perform constant background subtraction.
+        Perform constant background subtraction, with the opportunity to choose between the constbacksub procedure
+        and removing the radio frequency interference (RFI).
         """
-        return self._with_data(self.data - self.auto_const_bg())
+        if constbacksub:
+            im = self.constbacksub(overwrite=False)
+        else:
+            im = self.data - self.auto_const_bg()
+
+        if elimwrongchannels:
+            im = self.elimwrongchannels(im, overwrite=False)
+
+        return self._with_data(im)
+
+    def constbacksub(self, overwrite=True):
+        im = self.data.copy()
+
+        nx = im.shape[0]
+        ny = im.shape[1]
+
+        average_arr = np.average(im, axis=1)
+        for i in range(nx):
+            im[i, :] = im[i, :] - average_arr[i]
+
+        sdev_arr = np.zeros(ny)
+        for i in range(ny):
+            sdev_arr[i] = np.std(im[:, i])
+
+        # np.argsort is the equivalent to IDL's sort function (not np.sort())
+        zist = np.argsort(sdev_arr)
+        nPart = int(ny * 0.05)
+        zist = zist[0: nPart + 1]
+        bkgArr = im[:, zist]
+
+        background = np.average(bkgArr, axis=1)
+
+        for j in range(ny):
+            im[:, j] = im[:, j] - background
+
+        if overwrite:
+            self.data = im
+
+        return np.flipud(im)
+
+    def elimwrongchannels(self, im=None, overwrite=True):
+        if im is None:
+            im = self.data.copy()
+
+        nx = len(im[0, :])
+        ny = len(im[:, 0])
+
+        if nx <= 1 or ny <= 1:
+            return
+
+        print("Eliminating high-sigma channels...")
+        background = self.glidBackSub(im, 3, None)
+
+        # optimize std part
+        std = np.empty(ny, dtype=np.double)
+        for i in range(ny):
+            std[i] = np.std(im[i, :])
+
+        # Byte scale
+        std = skimage.util.img_as_ubyte(std / 255)
+        meanSigma = np.average(std)
+        zist = std < 5 * meanSigma
+        print(str(len(std) - sum(zist)) + " channels eliminated")
+
+        if np.sum(zist) != -1:
+            im = im[zist, :]
+
+        print("Eliminating sharp jumps between channels ...")
+        yProfile = np.average((filters.roberts(im.astype(float)).astype(float)), 1)
+        masked_data = np.ma.masked_array(yProfile, np.isnan(yProfile))
+        yProfile = masked_data - np.ma.average(masked_data)
+        meanSigma = np.std(yProfile)
+
+        zist = np.abs(yProfile) < 2 * meanSigma
+        print(str(len(yProfile) - sum(zist.data)) + " channels eliminated")
+        if np.sum(zist) != -1:
+            im = im[zist, :]
+
+        if np.sum(zist) == -1:
+            print("Sorry, all channels are bad ...")
+            im = 0
+
+        if overwrite:
+            self.data = im
+
+        return np.flipud(im)
+
+    def glidBackSub(self, imageP, wLenP, direction=None, weighted=None, background=None):
+        if direction is None:
+            direction = 'X'
+
+        if direction == 'X':
+            image = imageP
+        else:
+            image = np.transpose(imageP)
+
+        nx = len(image[:, 0])
+        ny = len(image[0, :])
+
+        wLenHalf = int(wLenP / 2)
+        wLen = wLenHalf * 2 + 1
+
+        backgr = np.zeros((nx, ny), dtype=np.float)
+
+        # i is of type float!
+        i = 0
+
+        if weighted is not None:
+            coeffs = wLenHalf - np.arange(0, wLenHalf, dtype=np.float)
+            sum = np.sum(coeffs)
+            while i < wLenHalf:
+                backgr[i, :] = np.sum(coeffs * image[0:wLenHalf + i - 1, :]) / sum
+                backgr[nx - i - 1, :] = np.sum(coeffs[::-1] * image[nx - i - 1:nx - 1, :]) / sum
+                i += 1
+                coeffs = [wLenHalf - i, coeffs]
+                sum = sum + coeffs[i]
+
+            while i < nx - wLenHalf:
+                backgr[i, :] = np.sum(coeffs * image[i - wLenHalf:i + wLenHalf, :]) / sum
+                i += 1
+        else:
+            while i < wLenHalf + 1:
+                backgr[i, :] = np.average(image[0:(i + wLenHalf) < (nx - 1), :], 0)
+                i += 1
+
+            i = wLenHalf + 1
+            while i < nx - wLenHalf:
+                backgr[i, :] = backgr[i - 1, :] + (image[i + wLenHalf, :]) - image[i - 1 - wLenHalf, :] / wLen
+                i += 1
+
+            while i <= nx - 1:
+                backgr[i, :] = np.average(image[i:nx - 1, :], 0)
+                i += 1
+
+        if direction == 'X':
+            return image - backgr
+        else:
+            if background is not None:
+                backgr = np.transpose(backgr)
+            return image - backgr
 
     def randomized_auto_const_bg(self, amount):
         """
@@ -1052,8 +1198,8 @@ class LinearTimeSpectrogram(Spectrogram):
         for elem in specs[1:]:
             e_init = (
                 SECONDS_PER_DAY * (
-                    get_day(elem.start) - get_day(start_day)
-                ).days + elem.t_init
+                get_day(elem.start) - get_day(start_day)
+            ).days + elem.t_init
             )
             x = int((e_init - last.t_init) / min_delt)
             xs.append(x)
