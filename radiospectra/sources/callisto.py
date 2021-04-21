@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function
 
 import datetime
 from collections import defaultdict
-from typing import Union, List
 import time
 
 import os
@@ -13,8 +12,6 @@ from distutils.version import LooseVersion
 import numpy as np
 from bs4 import BeautifulSoup
 from scipy.ndimage import gaussian_filter1d
-from sortedcontainers import SortedList
-import ruptures as rpt
 
 from astropy.io import fits
 from astropy.nddata.ccddata import CCDData
@@ -864,124 +861,6 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         merged_spec.header["DATAMAX"] = merged_matrix.max()
         return merged_spec
 
-
-    def subtract_bg_sliding_window(self, amount: float = 0.05, window_width: int = 0, affected_width: int = 0,
-                                   change_points: Union[bool, List[int]] = False):
-        _data = self.data.copy()
-
-        _og_image_height = _data.shape[0]
-        _og_image_width = _data.shape[1]
-
-        _bg = np.zeros([_og_image_height, _og_image_width])
-        _min_sdevs = np.zeros([_og_image_height, _og_image_width])
-        _out = _data.copy()
-
-        if isinstance(change_points, bool):
-            if change_points:
-                _cps = self.estimate_change_points()
-            else:
-                _cps = []
-        else:
-            _cps = change_points
-
-        if len(_cps) == 0:
-            _images = [(0, _og_image_width)]
-        else:
-            _images = []
-            _temp = 0
-            _cps = sorted(_cps)
-            for _cp in _cps:
-                _images.append((_temp, _cp))
-                _temp = _cp
-            _images.append((_temp, _og_image_width))
-
-        for (_img_start, _img_end) in _images:
-
-            _cwp = _img_start
-
-            _img_width = _img_end - _img_start
-            _img_data = _data[:, _img_start:_img_end]
-
-            _window_height = _og_image_height
-            _window_width = _img_width if (window_width == 0 or window_width > _img_width) else window_width
-            _affected_height = _og_image_height
-            _affected_width = _img_width if (affected_width == 0 or affected_width > _img_width) else (
-                affected_width if affected_width <= _window_width else _window_width)
-
-            _data_minus_avg = (_img_data - np.average(_img_data, 1).reshape(_img_data.shape[0], 1))
-            _sdevs = [(index, std) for (index, std) in enumerate(np.std(_data_minus_avg, 0))]
-
-            _half = max((_window_width - _affected_width) // 2, 0)
-            _division_fix = _half + _half != max(_img_width - _affected_width, 0)
-            _max_amount = max(1, int(amount * _img_width))
-
-            # calc initial set of used columns
-            _window_sdevs = [sdev for sdev in _sdevs[:_half]]
-            _sorted_sdevs = sorted(_window_sdevs, key=lambda y: y[1])
-            _bg_used_sdevs = SortedList(_sorted_sdevs, key=lambda y: y[1])
-
-            while _cwp <= _img_end:
-
-                _affected_left = _cwp
-                _affected_right = min(_affected_left + _affected_width, _img_end)
-                _window_left = max(_affected_left - _half if _division_fix else _affected_left - _half, _img_start)
-                _window_right = min(_affected_right + _half, _img_end)
-
-                for sdev in _sdevs[max(_window_left - _affected_width, 0) - _img_start:_window_left - _img_start]:
-                    _bg_used_sdevs.discard(sdev)
-
-                if _window_right <= _img_end:
-                    _bg_used_sdevs.update(
-                        _sdevs[_window_right - _affected_width - _img_start:_window_right - _img_start])
-
-                # calc current background
-                _current_background = np.average(_img_data[:, [sdev[0] for sdev in _bg_used_sdevs[:_max_amount]]], 1)
-                for sdev in _bg_used_sdevs[:_max_amount]:
-                    _min_sdevs[:, sdev[0] + _img_start] += 1
-                _bg[:, _affected_left:_affected_right] = np.repeat(_current_background.reshape(_bg.shape[0], 1),
-                                                                   (_affected_right - _affected_left), axis=1)
-
-                _cwp += _affected_width
-
-        _sbg = np.ma.subtract(_out, _bg)
-        return self._with_data(_sbg), self._with_data(_bg), self._with_data(_min_sdevs), _cps
-
-    def estimate_change_points(self, window_width=100, max_length_single_segment=20000, segment_width=10000):
-        """
-        Estimates the change points of the spectrogram and returns the indices.
-        If the spectrogram is too big it will get segmented.
-        These segments will overlap by 2*window_width to not miss change points where the spectrogram is segmented.
-
-        Parameters
-        ----------
-        window_width : int
-            width of the sliding window
-        max_length_single_segment : int
-            max width of data array. If bigger it will get segmented because of memory reasons
-        segment_width : int
-            width of the segments if the CallistoSpectrogram gets segmented
-        """
-        avgs = np.average(self.data, axis=0)
-        penalty = np.log(len(avgs)) * 8 * np.std(avgs) ** 2
-        changepoints = set()
-
-        if len(avgs) > max_length_single_segment:
-            num = len(avgs) // (segment_width - window_width * 2)
-            segments = [(x, x + segment_width) for x in np.multiply(range(0, num), (segment_width - window_width * 2))]
-            segments.append((len(avgs) - segment_width, len(avgs)))
-        else:
-            segments = [(0, len(avgs))]
-
-        if (len(segments)) > 3:
-            m = 'mahalanobis'
-        else:
-            m = 'rbf'
-
-        for start, end in segments:
-            mod = rpt.Window(model=m, width=window_width).fit(avgs[start:end])
-            res = np.array(mod.predict(pen=penalty)[:-1]) + start
-            changepoints.update(res)
-        return sorted(changepoints)
 
     def remove_single_freq_rfi(self, threshold=17, row_window_height=3):
         """

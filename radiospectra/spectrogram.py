@@ -9,6 +9,7 @@ from copy import copy
 from math import floor
 from random import randint
 from distutils.version import LooseVersion
+from typing import Union, List
 
 import numpy as np
 import skimage
@@ -19,6 +20,8 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter, IndexLocator, MaxNLocator
 from numpy import ma
 from scipy import ndimage
+from sortedcontainers import SortedList
+import ruptures as rpt
 
 from sunpy import __version__
 from sunpy.time import parse_time
@@ -694,22 +697,149 @@ class Spectrogram(Parent):
         bg = np.average(self.data[:, realcand], 1)
         return bg.reshape(self.shape[0], 1)
 
-    def subtract_bg(self, constbacksub=False, elimwrongchannels=False):
+    def subtract_bg(self, method="", *args):
         """
-        Perform constant background subtraction, with the opportunity to choose between the constbacksub procedure
-        and removing the radio frequency interference (RFI).
+        Perform background subtraction, with the opportunity to choose between different procedures
+        and the ability to remove the radio frequency interference (RFI).
         """
-        if constbacksub:
-            im = self.constbacksub(overwrite=False)
+        if method == "constbacksub":
+            im = self.constbacksub()
+
+        elif method == "subtract_bg_sliding_window":
+            im = self.subtract_bg_sliding_window()
+
+        elif method == "glidBackSub":
+            im = self.glidBackSub()
+
         else:
-            im = self.data - self.auto_const_bg()
+            # default background subtraction of radiospectra
+            im = self._with_data(self.data - self.auto_const_bg())
 
-        if elimwrongchannels:
-            im = self.elimwrongchannels(im, overwrite=False)
+        for arg in args:
+            if arg == "elimwrongchannels":
+                im = self.elimwrongchannels(im.data, overwrite=False)
 
-        return self._with_data(im)
+        return im
 
-    def constbacksub(self, overwrite=True):
+    def subtract_bg_sliding_window(self, amount: float = 0.05, window_width: int = 0, affected_width: int = 0,
+                                   change_points: Union[bool, List[int]] = False):
+        _data = self.data.copy()
+
+        _og_image_height = _data.shape[0]
+        _og_image_width = _data.shape[1]
+
+        _bg = np.zeros([_og_image_height, _og_image_width])
+        _min_sdevs = np.zeros([_og_image_height, _og_image_width])
+        _out = _data.copy()
+
+        if isinstance(change_points, bool):
+            if change_points:
+                _cps = self.estimate_change_points()
+            else:
+                _cps = []
+        else:
+            _cps = change_points
+
+        if len(_cps) == 0:
+            _images = [(0, _og_image_width)]
+        else:
+            _images = []
+            _temp = 0
+            _cps = sorted(_cps)
+            for _cp in _cps:
+                _images.append((_temp, _cp))
+                _temp = _cp
+            _images.append((_temp, _og_image_width))
+
+        for (_img_start, _img_end) in _images:
+
+            _cwp = _img_start
+
+            _img_width = _img_end - _img_start
+            _img_data = _data[:, _img_start:_img_end]
+
+            _window_height = _og_image_height
+            _window_width = _img_width if (window_width == 0 or window_width > _img_width) else window_width
+            _affected_height = _og_image_height
+            _affected_width = _img_width if (affected_width == 0 or affected_width > _img_width) else (
+                affected_width if affected_width <= _window_width else _window_width)
+
+            _data_minus_avg = (_img_data - np.average(_img_data, 1).reshape(_img_data.shape[0], 1))
+            _sdevs = [(index, std) for (index, std) in enumerate(np.std(_data_minus_avg, 0))]
+
+            _half = max((_window_width - _affected_width) // 2, 0)
+            _division_fix = _half + _half != max(_img_width - _affected_width, 0)
+            _max_amount = max(1, int(amount * _img_width))
+
+            # calc initial set of used columns
+            _window_sdevs = [sdev for sdev in _sdevs[:_half]]
+            _sorted_sdevs = sorted(_window_sdevs, key=lambda y: y[1])
+            _bg_used_sdevs = SortedList(_sorted_sdevs, key=lambda y: y[1])
+
+            while _cwp <= _img_end:
+
+                _affected_left = _cwp
+                _affected_right = min(_affected_left + _affected_width, _img_end)
+                _window_left = max(_affected_left - _half if _division_fix else _affected_left - _half, _img_start)
+                _window_right = min(_affected_right + _half, _img_end)
+
+                for sdev in _sdevs[max(_window_left - _affected_width, 0) - _img_start:_window_left - _img_start]:
+                    _bg_used_sdevs.discard(sdev)
+
+                if _window_right <= _img_end:
+                    _bg_used_sdevs.update(
+                        _sdevs[_window_right - _affected_width - _img_start:_window_right - _img_start])
+
+                # calc current background
+                _current_background = np.average(_img_data[:, [sdev[0] for sdev in _bg_used_sdevs[:_max_amount]]], 1)
+                for sdev in _bg_used_sdevs[:_max_amount]:
+                    _min_sdevs[:, sdev[0] + _img_start] += 1
+                _bg[:, _affected_left:_affected_right] = np.repeat(_current_background.reshape(_bg.shape[0], 1),
+                                                                   (_affected_right - _affected_left), axis=1)
+
+                _cwp += _affected_width
+
+        _sbg = np.ma.subtract(_out, _bg)
+        return self._with_data(_sbg), self._with_data(_bg), self._with_data(_min_sdevs), _cps
+
+    def estimate_change_points(self, window_width=100, max_length_single_segment=20000, segment_width=10000):
+        """
+        Estimates the change points of the spectrogram and returns the indices.
+        If the spectrogram is too big it will get segmented.
+        These segments will overlap by 2*window_width to not miss change points where the spectrogram is segmented.
+
+        Parameters
+        ----------
+        window_width : int
+            width of the sliding window
+        max_length_single_segment : int
+            max width of data array. If bigger it will get segmented because of memory reasons
+        segment_width : int
+            width of the segments if the CallistoSpectrogram gets segmented
+        """
+        avgs = np.average(self.data, axis=0)
+        penalty = np.log(len(avgs)) * 8 * np.std(avgs) ** 2
+        changepoints = set()
+
+        if len(avgs) > max_length_single_segment:
+            num = len(avgs) // (segment_width - window_width * 2)
+            segments = [(x, x + segment_width) for x in np.multiply(range(0, num), (segment_width - window_width * 2))]
+            segments.append((len(avgs) - segment_width, len(avgs)))
+        else:
+            segments = [(0, len(avgs))]
+
+        if (len(segments)) > 3:
+            m = 'mahalanobis'
+        else:
+            m = 'rbf'
+
+        for start, end in segments:
+            mod = rpt.Window(model=m, width=window_width).fit(avgs[start:end])
+            res = np.array(mod.predict(pen=penalty)[:-1]) + start
+            changepoints.update(res)
+        return sorted(changepoints)
+
+    def constbacksub(self):
         im = self.data.copy()
 
         nx = im.shape[0]
@@ -734,10 +864,7 @@ class Spectrogram(Parent):
         for j in range(ny):
             im[:, j] = im[:, j] - background
 
-        if overwrite:
-            self.data = im
-
-        return np.flipud(im)
+        return self._with_data(im)
 
     def elimwrongchannels(self, im=None, overwrite=True):
         if im is None:
@@ -749,8 +876,8 @@ class Spectrogram(Parent):
         if nx <= 1 or ny <= 1:
             return
 
-        print("Eliminating high-sigma channels...")
-        background = self.glidBackSub(im, 3, None)
+        # print("Eliminating high-sigma channels...")
+        # background = self.glidBackSub(im, 3, None)
 
         # optimize std part
         std = np.empty(ny, dtype=np.double)
@@ -784,21 +911,16 @@ class Spectrogram(Parent):
         if overwrite:
             self.data = im
 
-        return np.flipud(im)
+        return self._with_data(im)
 
-    def glidBackSub(self, imageP, wLenP, direction=None, weighted=None, background=None):
-        if direction is None:
-            direction = 'X'
-
-        if direction == 'X':
-            image = imageP
-        else:
-            image = np.transpose(imageP)
+    def glidBackSub(self, image=None, weighted=None):
+        if image is None:
+            image = self.data.copy()
 
         nx = len(image[:, 0])
         ny = len(image[0, :])
 
-        wLenHalf = int(wLenP / 2)
+        wLenHalf = int(len(image) / 2)
         wLen = wLenHalf * 2 + 1
 
         backgr = np.zeros((nx, ny), dtype=np.float)
@@ -833,12 +955,7 @@ class Spectrogram(Parent):
                 backgr[i, :] = np.average(image[i:nx - 1, :], 0)
                 i += 1
 
-        if direction == 'X':
-            return image - backgr
-        else:
-            if background is not None:
-                backgr = np.transpose(backgr)
-            return image - backgr
+        return self._with_data(image - backgr)
 
     def randomized_auto_const_bg(self, amount):
         """
