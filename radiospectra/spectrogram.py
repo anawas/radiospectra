@@ -697,27 +697,28 @@ class Spectrogram(Parent):
         bg = np.average(self.data[:, realcand], 1)
         return bg.reshape(self.shape[0], 1)
 
-    def subtract_bg(self, method="", *args):
+    def subtract_bg(self, *args):
         """
         Perform background subtraction, with the opportunity to choose between different procedures
         and the ability to remove the radio frequency interference (RFI).
         """
-        if method == "constbacksub":
-            im = self.constbacksub()
-
-        elif method == "subtract_bg_sliding_window":
-            im = self.subtract_bg_sliding_window()
-
-        elif method == "glidBackSub":
-            im = self.glidBackSub()
-
-        else:
-            # default background subtraction of radiospectra
-            im = self._with_data(self.data - self.auto_const_bg())
-
+        im = None
         for arg in args:
-            if arg == "elimwrongchannels":
-                im = self.elimwrongchannels(im.data, overwrite=False)
+            if arg == "constbacksub":
+                im = self.constbacksub()
+
+            elif arg == "subtract_bg_sliding_window":
+                im = self.subtract_bg_sliding_window()
+
+            elif arg == "glidBackSub":
+                im = self.glidBackSub()
+
+            elif arg == "elimwrongchannels":
+                im = self.elimwrongchannels(im, overwrite=False)
+
+            elif arg == "default":
+                # default background subtraction of radiospectra
+                im = self._with_data(self.data - self.auto_const_bg())
 
         return im
 
@@ -880,18 +881,20 @@ class Spectrogram(Parent):
         # background = self.glidBackSub(im, 3, None)
 
         # optimize std part
-        std = np.empty(ny, dtype=np.double)
+        std = np.ndarray((ny,), dtype=np.double)
         for i in range(ny):
-            std[i] = np.std(im[i, :])
+            # Calculate std for each row and ignore nan's
+            std[i] = np.nanstd(im[i, :].data)
 
         # Byte scale
-        std = skimage.util.img_as_ubyte(std / 255)
+        std = np.array(self.bytscl(std))
         meanSigma = np.average(std)
-        zist = std < 5 * meanSigma
-        print(str(len(std) - sum(zist)) + " channels eliminated")
+        positions = std < 5 * meanSigma
+        zist = std[positions]
+        print(str(len(std) - len(zist)) + " channels eliminated")
 
         if np.sum(zist) != -1:
-            im = im[zist, :]
+            im = im[positions, :]
 
         print("Eliminating sharp jumps between channels ...")
         yProfile = np.average((filters.roberts(im.astype(float)).astype(float)), 1)
@@ -899,10 +902,11 @@ class Spectrogram(Parent):
         yProfile = masked_data - np.ma.average(masked_data)
         meanSigma = np.std(yProfile)
 
-        zist = np.abs(yProfile) < 2 * meanSigma
-        print(str(len(yProfile) - sum(zist.data)) + " channels eliminated")
+        positions = np.abs(yProfile) < 2 * meanSigma
+        zist = yProfile[positions]
+        print(str(len(yProfile) - len(zist)) + " channels eliminated")
         if np.sum(zist) != -1:
-            im = im[zist, :]
+            im = im[positions, :]
 
         if np.sum(zist) == -1:
             print("Sorry, all channels are bad ...")
@@ -912,6 +916,27 @@ class Spectrogram(Parent):
             self.data = im
 
         return self._with_data(im)
+
+    # Source: https://bytes.com/topic/python/answers/640336-scaling
+    def bytsclGen(self, data, minvalue=None, maxvalue=None, top=255):
+        if minvalue is None:
+            minvalue = min(data)
+
+        if maxvalue is None:
+            maxvalue = max(data)
+
+        for x in data:
+            if np.isnan(x):
+                yield int(0)
+            elif x < minvalue:
+                yield int(0)
+            elif x > maxvalue:
+                yield int(top)
+            else:
+                yield int((x - minvalue) * top / (maxvalue - minvalue))
+
+    def bytscl(self, data, minvalue=None, maxvalue=None, top=255):
+        return list(self.bytsclGen(data, minvalue, maxvalue, top))
 
     def glidBackSub(self, image=None, weighted=None):
         if image is None:
