@@ -922,6 +922,7 @@ class Spectrogram(Parent):
             self.rfi_freq_axis = rfi_freq_axis
 
         spec = self._with_data(im)
+        spec.freq_axis = freq_axis
         spec.rfi_freq_axis = rfi_freq_axis
         return spec
 
