@@ -702,25 +702,26 @@ class Spectrogram(Parent):
         Perform background subtraction, with the opportunity to choose between different procedures
         and the ability to remove the radio frequency interference (RFI).
         """
-        im = None
+        spec = None
         for arg in args:
             if arg == "constbacksub":
-                im = self.constbacksub()
+                spec = self.constbacksub()
 
             elif arg == "subtract_bg_sliding_window":
-                im = self.subtract_bg_sliding_window()
+                _sbg, _bg, _min_sdevs, _cps = self.subtract_bg_sliding_window()
+                spec = _sbg
 
             elif arg == "glidBackSub":
-                im = self.glidBackSub()
+                spec = self.glidBackSub()
 
             elif arg == "elimwrongchannels":
-                im = self.elimwrongchannels(im, overwrite=False)
+                spec = self.elimwrongchannels(spec, overwrite=False)
 
             elif arg == "default":
                 # default background subtraction of radiospectra
-                im = self._with_data(self.data - self.auto_const_bg())
+                spec = self._with_data(self.data - self.auto_const_bg())
 
-        return im
+        return spec
 
     def subtract_bg_sliding_window(self, amount: float = 0.05, window_width: int = 0, affected_width: int = 0,
                                    change_points: Union[bool, List[int]] = False):
