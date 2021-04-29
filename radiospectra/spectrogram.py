@@ -12,7 +12,6 @@ from distutils.version import LooseVersion
 from typing import Union, List
 
 import numpy as np
-import skimage
 from skimage import filters
 from matplotlib import pyplot as plt
 from matplotlib.colorbar import Colorbar
@@ -407,6 +406,7 @@ class Spectrogram(Parent):
 
         self.time_axis = time_axis
         self.freq_axis = freq_axis
+        self.rfi_freq_axis = np.array([])
 
         self.content = content
         self.instruments = instruments
@@ -702,24 +702,24 @@ class Spectrogram(Parent):
         Perform background subtraction, with the opportunity to choose between different procedures
         and the ability to remove the radio frequency interference (RFI).
         """
-        spec = None
+        spec = copy(self)
         for arg in args:
             if arg == "constbacksub":
-                spec = self.constbacksub()
+                spec = spec.constbacksub(overwrite=False)
 
             elif arg == "subtract_bg_sliding_window":
-                _sbg, _bg, _min_sdevs, _cps = self.subtract_bg_sliding_window()
+                _sbg, _bg, _min_sdevs, _cps = spec.subtract_bg_sliding_window()
                 spec = _sbg
 
-            elif arg == "glidBackSub":
-                spec = self.glidBackSub()
+            elif arg == "glid_back_sub":
+                spec = spec.glid_back_sub(overwrite=False)
 
             elif arg == "elimwrongchannels":
-                spec = self.elimwrongchannels(spec, overwrite=False)
+                spec = spec.elimwrongchannels(overwrite=False)
 
             elif arg == "default":
                 # default background subtraction of radiospectra
-                spec = self._with_data(self.data - self.auto_const_bg())
+                spec = spec._with_data(spec.data - spec.auto_const_bg())
 
         return spec
 
@@ -841,7 +841,7 @@ class Spectrogram(Parent):
             changepoints.update(res)
         return sorted(changepoints)
 
-    def constbacksub(self):
+    def constbacksub(self, overwrite=True):
         im = self.data.copy()
 
         nx = im.shape[0]
@@ -866,20 +866,16 @@ class Spectrogram(Parent):
         for j in range(ny):
             im[:, j] = im[:, j] - background
 
+        if overwrite:
+            self.data = im
+
         return self._with_data(im)
 
-    def elimwrongchannels(self, im=None, overwrite=True):
-        if im is None:
-            im = self.data.copy()
-
-        nx = len(im[0, :])
-        ny = len(im[:, 0])
-
-        if nx <= 1 or ny <= 1:
-            return
-
-        # print("Eliminating high-sigma channels...")
-        # background = self.glidBackSub(im, 3, None)
+    def elimwrongchannels(self, overwrite=True):
+        im = self.data.copy()
+        freq_axis = self.freq_axis.copy()
+        rfi_freq_axis = self.rfi_freq_axis.copy()
+        ny = len(im.data[:, 0])
 
         # optimize std part
         std = np.ndarray((ny,), dtype=np.double)
@@ -889,25 +885,32 @@ class Spectrogram(Parent):
 
         # Byte scale
         std = np.array(self.bytscl(std))
-        meanSigma = np.average(std)
-        positions = std < 5 * meanSigma
+        mean_sigma = np.average(std)
+        positions = std < 5 * mean_sigma
         zist = std[positions]
-        print(str(len(std) - len(zist)) + " channels eliminated")
+        eliminated_channels = len(std) - len(zist)
+        print(str(eliminated_channels) + " channels eliminated")
 
-        if np.sum(zist) != -1:
+        rfi_freq_axis = self.update_rfi_header(freq_axis, rfi_freq_axis, positions)
+        if np.sum(zist) != -1 and eliminated_channels != 0:
             im = im[positions, :]
+            freq_axis = freq_axis[positions]
 
         print("Eliminating sharp jumps between channels ...")
-        yProfile = np.average((filters.roberts(im.astype(float)).astype(float)), 1)
-        masked_data = np.ma.masked_array(yProfile, np.isnan(yProfile))
-        yProfile = masked_data - np.ma.average(masked_data)
-        meanSigma = np.std(yProfile)
+        y_profile = np.average((filters.roberts(im.astype(float)).astype(float)), 1)
+        masked_data = np.ma.masked_array(y_profile, np.isnan(y_profile))
+        y_profile = masked_data - np.ma.average(masked_data)
+        mean_sigma = np.std(y_profile)
 
-        positions = np.abs(yProfile) < 2 * meanSigma
-        zist = yProfile[positions]
-        print(str(len(yProfile) - len(zist)) + " channels eliminated")
-        if np.sum(zist) != -1:
+        positions = np.abs(y_profile) < 2 * mean_sigma
+        zist = y_profile[positions]
+        eliminated_channels = len(y_profile) - len(zist)
+        print(str(eliminated_channels) + " channels eliminated")
+
+        rfi_freq_axis = self.update_rfi_header(freq_axis, rfi_freq_axis, positions)
+        if np.sum(zist) != -1 and eliminated_channels != 0:
             im = im[positions, :]
+            freq_axis = freq_axis[positions]
 
         if np.sum(zist) == -1:
             print("Sorry, all channels are bad ...")
@@ -915,11 +918,23 @@ class Spectrogram(Parent):
 
         if overwrite:
             self.data = im
+            self.freq_axis = freq_axis
+            self.rfi_freq_axis = rfi_freq_axis
 
-        return self._with_data(im)
+        spec = self._with_data(im)
+        spec.rfi_freq_axis = rfi_freq_axis
+        return spec
+
+    def update_rfi_header(self, freq_axis, rfi_freq_axis, positions):
+        for curr_position, valid in enumerate(positions):
+            if not valid:
+                curr_freq = freq_axis[curr_position]
+                idx = rfi_freq_axis.searchsorted(curr_freq)
+                rfi_freq_axis = np.concatenate((rfi_freq_axis[:idx], [curr_freq], rfi_freq_axis[idx:]))
+        return rfi_freq_axis
 
     # Source: https://bytes.com/topic/python/answers/640336-scaling
-    def bytsclGen(self, data, minvalue=None, maxvalue=None, top=255):
+    def bytscl_gen(self, data, minvalue=None, maxvalue=None, top=255):
         if minvalue is None:
             minvalue = min(data)
 
@@ -937,17 +952,16 @@ class Spectrogram(Parent):
                 yield int((x - minvalue) * top / (maxvalue - minvalue))
 
     def bytscl(self, data, minvalue=None, maxvalue=None, top=255):
-        return list(self.bytsclGen(data, minvalue, maxvalue, top))
+        return list(self.bytscl_gen(data, minvalue, maxvalue, top))
 
-    def glidBackSub(self, image=None, weighted=None):
-        if image is None:
-            image = self.data.copy()
+    def glid_back_sub(self, weighted=None, overwrite=True):
+        image = self.data.copy()
 
         nx = len(image[:, 0])
         ny = len(image[0, :])
 
-        wLenHalf = int(len(image) / 2)
-        wLen = wLenHalf * 2 + 1
+        w_len_half = int(len(image) / 2)
+        w_len = w_len_half * 2 + 1
 
         backgr = np.zeros((nx, ny), dtype=np.float)
 
@@ -955,31 +969,34 @@ class Spectrogram(Parent):
         i = 0
 
         if weighted is not None:
-            coeffs = wLenHalf - np.arange(0, wLenHalf, dtype=np.float)
+            coeffs = w_len_half - np.arange(0, w_len_half, dtype=np.float)
             sum = np.sum(coeffs)
-            while i < wLenHalf:
-                backgr[i, :] = np.sum(coeffs * image[0:wLenHalf + i - 1, :]) / sum
+            while i < w_len_half:
+                backgr[i, :] = np.sum(coeffs * image[0:w_len_half + i - 1, :]) / sum
                 backgr[nx - i - 1, :] = np.sum(coeffs[::-1] * image[nx - i - 1:nx - 1, :]) / sum
                 i += 1
-                coeffs = [wLenHalf - i, coeffs]
+                coeffs = [w_len_half - i, coeffs]
                 sum = sum + coeffs[i]
 
-            while i < nx - wLenHalf:
-                backgr[i, :] = np.sum(coeffs * image[i - wLenHalf:i + wLenHalf, :]) / sum
+            while i < nx - w_len_half:
+                backgr[i, :] = np.sum(coeffs * image[i - w_len_half:i + w_len_half, :]) / sum
                 i += 1
         else:
-            while i < wLenHalf + 1:
-                backgr[i, :] = np.average(image[0:(i + wLenHalf) < (nx - 1), :], 0)
+            while i < w_len_half + 1:
+                backgr[i, :] = np.average(image[0:(i + w_len_half) < (nx - 1), :], 0)
                 i += 1
 
-            i = wLenHalf + 1
-            while i < nx - wLenHalf:
-                backgr[i, :] = backgr[i - 1, :] + (image[i + wLenHalf, :]) - image[i - 1 - wLenHalf, :] / wLen
+            i = w_len_half + 1
+            while i < nx - w_len_half:
+                backgr[i, :] = backgr[i - 1, :] + (image[i + w_len_half, :]) - image[i - 1 - w_len_half, :] / w_len
                 i += 1
 
             while i <= nx - 1:
                 backgr[i, :] = np.average(image[i:nx - 1, :], 0)
                 i += 1
+
+        if overwrite:
+            self.data = image
 
         return self._with_data(image - backgr)
 

@@ -217,6 +217,17 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         hdulist = data.to_hdu()
         hdulist.insert(1, table)
 
+        if self.rfi_freq_axis.size != 0:
+            # Putting information, which frequencies channels were removed into the header
+            freq_col = fits.Column(
+                name="RFI_FREQUENCY",
+                format=f"{len(self.rfi_freq_axis)}D8.3",
+                array=np.reshape(np.array(self.rfi_freq_axis), (1, len(self.rfi_freq_axis)))
+            )
+            rfi_freq_col = fits.ColDefs([freq_col])
+            rfi_table = fits.BinTableHDU.from_columns(rfi_freq_col, header=self.axes_header, name='RFI_FREQ')
+            hdulist.insert(2, rfi_table)
+
         if not os.path.exists(filepath):
             hdulist.writeto(filepath)
             return filepath
