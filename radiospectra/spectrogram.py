@@ -697,23 +697,35 @@ class Spectrogram(Parent):
         bg = np.average(self.data[:, realcand], 1)
         return bg.reshape(self.shape[0], 1)
 
-    def subtract_bg(self, *args):
+    def subtract_bg(self, *args, **kwargs):
         """
         Perform background subtraction, with the opportunity to choose between different procedures
         and the ability to remove the radio frequency interference (RFI).
 
-        default: It's the default background subtraction of radiospectra by using the "auto_const_bg()" function
+        default:
+        Default background subtraction of radiospectra by using the "auto_const_bg()" function
 
-        constbacksub: Background subtraction method where the average and the standard deviation of each row
+        constbacksub:
+        Background subtraction method where the average and the standard deviation of each row
         will be calculated and subtracted from the image.
 
-        subtract_bg_sliding_window: Another background subtraction method with the possibility
-        of having a sliding window and changing points.
+        subtract_bg_sliding_window:
+        Performs background subtraction with the possibility of having a sliding window and changing points.
 
-        glid_back_sub: A gliding background subtraction method, where the sum weighted from the
+        glid_back_sub:
+        A gliding background subtraction method, where the sum weighted from the
         coefficients of the evenly spaces values of each row will be subtracted from the spectrogram.
 
-        elimwrongchannels: Removing the RFI (radio frequency interference) from the spectrogram.
+        elimwrongchannels:
+        Removing the RFI (radio frequency interference) from the spectrogram.
+
+        Parameters
+        ----------
+        *args:
+        List of desired methods that should be called.
+
+        **kwargs:
+        List of arguments that should be passed to a subfunction
 
         """
         spec = copy(self)
@@ -726,7 +738,7 @@ class Spectrogram(Parent):
                 spec = spec.constbacksub(overwrite=False)
 
             elif arg == "subtract_bg_sliding_window":
-                _sbg, _bg, _min_sdevs, _cps = spec.subtract_bg_sliding_window()
+                _sbg, _bg, _min_sdevs, _cps = spec.subtract_bg_sliding_window(**kwargs)
                 spec = _sbg
 
             elif arg == "glid_back_sub":
@@ -750,17 +762,17 @@ class Spectrogram(Parent):
 
         Parameters
         ----------
-        amount: float
+        amount : float
         The percent amount (out of 1) of lowest standard deviation to consider.
 
-        window_width: int
+        window_width : int
         The width of the sliding window that is used to calculate the background.
 
-        affected_width: int
-        The width of the section where the background calculated by the window_width gets subtracted. 
+        affected_width : int
+        The width of the section where the background calculated by the window_width gets subtracted.
         It is centered in the sliding window and is also the step size.
 
-        change_points: list of int or bool
+        change_points : list of int or bool
         If a list of ints is provided it will use these values as change points. If a bool is
         provided it will estimate the change points if true or won't include any change points if false.
         """
@@ -1020,10 +1032,10 @@ class Spectrogram(Parent):
 
         Parameters
         ----------
-        weighted: bool
+        weighted : bool
             If true, the coefficients of each rows will be considered dependent on the image width.
         overwrite : bool
-            If function elimwrongchannels has been called directly, there will be a possibilty to overwrite it's current
+            If function glid_back_sub has been called directly, there will be a possibilty to overwrite it's current
             spectrogram data
         """
         image = self.data.copy()
