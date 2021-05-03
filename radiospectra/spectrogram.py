@@ -701,6 +701,20 @@ class Spectrogram(Parent):
         """
         Perform background subtraction, with the opportunity to choose between different procedures
         and the ability to remove the radio frequency interference (RFI).
+
+        default: It's the default background subtraction of radiospectra by using the "auto_const_bg()" function
+
+        constbacksub: Background subtraction method where the average and the standard deviation of each row
+        will be calculated and subtracted from the image.
+
+        subtract_bg_sliding_window: Another background subtraction method with the possibility
+        of having a sliding window and changing points.
+
+        glid_back_sub: A gliding background subtraction method, where the sum weighted from the
+        coefficients of the evenly spaces values of each row will be subtracted from the spectrogram.
+
+        elimwrongchannels: Removing the RFI (radio frequency interference) from the spectrogram.
+
         """
         spec = copy(self)
         for arg in args:
@@ -729,6 +743,20 @@ class Spectrogram(Parent):
 
     def subtract_bg_sliding_window(self, amount: float = 0.05, window_width: int = 0, affected_width: int = 0,
                                    change_points: Union[bool, List[int]] = False):
+        """
+
+
+        Parameters
+        ----------
+        amount: float
+
+        window_width: int
+
+        affected_width: int
+
+        change_points: bool
+        """
+
         _data = self.data.copy()
 
         _og_image_height = _data.shape[0]
@@ -846,6 +874,16 @@ class Spectrogram(Parent):
         return sorted(changepoints)
 
     def constbacksub(self, overwrite=True):
+        """
+        Background subtraction method where the average and the standard deviation of each row
+        will be calculated and subtracted from the image.
+
+        Parameters
+        ----------
+        overwrite : bool
+            If function constbacksub has been called directly, there will be a possibilty to overwrite it's current
+            spectrogram data
+        """
         im = self.data.copy()
 
         nx = im.shape[0]
@@ -859,7 +897,6 @@ class Spectrogram(Parent):
         for i in range(ny):
             sdev_arr[i] = np.std(im[:, i])
 
-        # np.argsort is the equivalent to IDL's sort function (not np.sort())
         zist = np.argsort(sdev_arr)
         nPart = int(ny * 0.05)
         zist = zist[0: nPart + 1]
@@ -876,6 +913,15 @@ class Spectrogram(Parent):
         return self._with_data(im)
 
     def elimwrongchannels(self, overwrite=True):
+        """
+        Removing the RFI (radio frequency interference) from the spectrogram
+
+        Parameters
+        ----------
+        overwrite : bool
+            If function elimwrongchannels has been called directly, there will be a possibilty to overwrite it's current
+            spectrogram data
+        """
         im = self.data.copy()
         freq_axis = self.freq_axis.copy()
         rfi_freq_axis = self.rfi_freq_axis.copy()
@@ -960,6 +1006,18 @@ class Spectrogram(Parent):
         return list(self.bytscl_gen(data, minvalue, maxvalue, top))
 
     def glid_back_sub(self, weighted=None, overwrite=True):
+        """
+        A gliding background subtraction method, where the sum weighted from the
+        coefficients of the evenly spaces values of each row will be subtracted from the spectrogram.
+
+        Parameters
+        ----------
+        weighted: bool
+            If true, the coefficients of each rows will be considered dependent on the image width.
+        overwrite : bool
+            If function elimwrongchannels has been called directly, there will be a possibilty to overwrite it's current
+            spectrogram data
+        """
         image = self.data.copy()
 
         nx = len(image[:, 0])
