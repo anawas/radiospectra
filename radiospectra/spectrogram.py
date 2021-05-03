@@ -744,17 +744,25 @@ class Spectrogram(Parent):
     def subtract_bg_sliding_window(self, amount: float = 0.05, window_width: int = 0, affected_width: int = 0,
                                    change_points: Union[bool, List[int]] = False):
         """
-
+        Performs background subtraction with a sliding window. Change points where significant jumps in
+        value are observed or expected can be specified or automatically estimated. If change points are present
+        each one will split the spectrogram and each resulting part will have its background removed independently.
 
         Parameters
         ----------
         amount: float
+        The percent amount (out of 1) of lowest standard deviation to consider.
 
         window_width: int
+        The width of the sliding window that is used to calculate the background.
 
         affected_width: int
+        The width of the section where the background calculated by the window_width gets subtracted. 
+        It is centered in the sliding window and is also the step size.
 
-        change_points: bool
+        change_points: list of int or bool
+        If a list of ints is provided it will use these values as change points. If a bool is
+        provided it will estimate the change points if true or won't include any change points if false.
         """
 
         _data = self.data.copy()
