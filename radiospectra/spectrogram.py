@@ -704,7 +704,11 @@ class Spectrogram(Parent):
         """
         spec = copy(self)
         for arg in args:
-            if arg == "constbacksub":
+            if arg == "default":
+                # default background subtraction of radiospectra
+                spec = spec._with_data(spec.data - spec.auto_const_bg())
+
+            elif arg == "constbacksub":
                 spec = spec.constbacksub(overwrite=False)
 
             elif arg == "subtract_bg_sliding_window":
@@ -717,9 +721,9 @@ class Spectrogram(Parent):
             elif arg == "elimwrongchannels":
                 spec = spec.elimwrongchannels(overwrite=False)
 
-            elif arg == "default":
-                # default background subtraction of radiospectra
-                spec = spec._with_data(spec.data - spec.auto_const_bg())
+        if len(args) == 0:
+            # default background subtraction of radiospectra
+            spec = spec._with_data(spec.data - spec.auto_const_bg())
 
         return spec
 
