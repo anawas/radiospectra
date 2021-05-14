@@ -1008,7 +1008,6 @@ class Spectrogram(Parent):
                 rfi_freq_axis = np.concatenate((rfi_freq_axis[:idx], [curr_freq], rfi_freq_axis[idx:]))
         return rfi_freq_axis
 
-
     def glid_back_sub(self, weighted=None, overwrite=True):
         """
         A gliding background subtraction method, where the sum weighted from the

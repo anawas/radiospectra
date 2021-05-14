@@ -582,7 +582,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         else:
             return self
 
-        return CallistoSpectrogram.new_join_many([self] + data, **kwargs)
+        filtered_data = list()
+        for current_data in data:
+            if current_data.header["PWM_VAL"] == self.header["PWM_VAL"]:
+                filtered_data.append(current_data)
+
+        return CallistoSpectrogram.new_join_many([self] + filtered_data, **kwargs)
 
     @classmethod
     def from_url(cls, url):
