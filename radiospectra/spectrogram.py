@@ -954,7 +954,11 @@ class Spectrogram(Parent):
             std[i] = np.nanstd(im[i, :].data)
 
         # Byte scale
-        std = np.array(self.bytscl(std))
+        std = ((std - np.nanmin(std)) * 255) / (np.nanmax(std) - np.nanmin(std))
+        std[std > 255] = 255
+        np.nan_to_num(std, copy=False)
+        std = std.astype(int)
+
         mean_sigma = np.average(std)
         positions = std < 5 * mean_sigma
         zist = std[positions]
@@ -1004,26 +1008,6 @@ class Spectrogram(Parent):
                 rfi_freq_axis = np.concatenate((rfi_freq_axis[:idx], [curr_freq], rfi_freq_axis[idx:]))
         return rfi_freq_axis
 
-    # Source: https://bytes.com/topic/python/answers/640336-scaling
-    def bytscl_gen(self, data, minvalue=None, maxvalue=None, top=255):
-        if minvalue is None:
-            minvalue = min(data)
-
-        if maxvalue is None:
-            maxvalue = max(data)
-
-        for x in data:
-            if np.isnan(x):
-                yield int(0)
-            elif x < minvalue:
-                yield int(0)
-            elif x > maxvalue:
-                yield int(top)
-            else:
-                yield int((x - minvalue) * top / (maxvalue - minvalue))
-
-    def bytscl(self, data, minvalue=None, maxvalue=None, top=255):
-        return list(self.bytscl_gen(data, minvalue, maxvalue, top))
 
     def glid_back_sub(self, weighted=None, overwrite=True):
         """
