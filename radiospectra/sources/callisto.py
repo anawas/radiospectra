@@ -1,6 +1,4 @@
-# -*- coding: utf-8 -*-
-from __future__ import absolute_import, division, print_function
-
+import urllib
 import datetime
 from collections import defaultdict
 import time
@@ -21,10 +19,8 @@ from sunpy import __version__
 from sunpy.time import parse_time
 from sunpy.util.net import download_file
 
-from radiospectra.extern.six import itervalues, next
-from radiospectra.extern.six.moves import urllib
 from radiospectra.spectrogram import REFERENCE, LinearTimeSpectrogram, _union
-from radiospectra.util import ConditionalDispatch, run_cls, minimal_pairs
+from radiospectra.util import ConditionalDispatch, minimal_pairs, run_cls
 
 __all__ = ['CallistoSpectrogram']
 
@@ -87,7 +83,7 @@ def query(start, end, instruments=None, url=DEFAULT_URL):
 
                 if (instruments is not None and
                     inst not in instruments and
-                    (inst, int(no)) not in instruments):
+                        (inst, int(no)) not in instruments):
                     continue
 
                 dend = dstart + DATA_SIZE
@@ -449,7 +445,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         return objs
 
     @classmethod
-    def from_range(cls, instrument, start, end, **kwargs):
+    def from_range(cls, instrument, start, end):
         """
         Automatically download data from instrument between start and end and
         join it together.
@@ -463,8 +459,24 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         end : `~sunpy.time.parse_time` compatible
             end of the measurement
         """
-        specs = cls.load_from_range(instrument, start, end, **kwargs)
-        return cls.new_join_many(specs)
+
+        if SUNPY_LT_1:
+            start = parse_time(start)
+            end = parse_time(end)
+        else:
+            start = parse_time(start).datetime
+            end = parse_time(end).datetime
+        urls = query(start, end, [instrument])
+        data = list(map(cls.from_url, urls))
+        freq_buckets = defaultdict(list)
+        for elem in data:
+            freq_buckets[tuple(elem.freq_axis)].append(elem)
+        try:
+            return cls.combine_frequencies(
+                [cls.new_join_many(elem) for elem in freq_buckets.values()]
+            )
+        except ValueError:
+            raise ValueError("No data found.")
 
     def _overlap(self, other):
         """
@@ -533,7 +545,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         Return overlapping part of self and other as (self, other) tuple.
         Homogenize intensities so that the images can be used with
         combine_frequencies. Note that this works best when most of the picture
-        is signal, so use :py:meth:`in_interval` to select the subset of your
+        is signal, so use :meth:`in_interval` to select the subset of your
         image before applying this method.
 
         Parameters
@@ -969,8 +981,8 @@ CallistoSpectrogram._create.add(
 )
 
 try:
-    CallistoSpectrogram.create.im_func.__doc__ = (
-        """Create CallistoSpectrogram from given input dispatching to the
+    CallistoSpectrogram.create.__func__.__doc__ = (
+        """ Create CallistoSpectrogram from given input dispatching to the
         appropriate from_* function.
 
     Possible signatures:
@@ -978,14 +990,9 @@ try:
     """ + CallistoSpectrogram._create.generate_docs())
 except AttributeError:
     CallistoSpectrogram.create.__func__.__doc__ = (
-        """Create CallistoSpectrogram from given input dispatching to the
+        """ Create CallistoSpectrogram from given input dispatching to the
         appropriate from_* function.
 
     Possible signatures:
 
     """ + CallistoSpectrogram._create.generate_docs())
-
-if __name__ == "__main__":
-    opn = CallistoSpectrogram.read("callisto/BIR_20110922_103000_01.fit")
-    opn.subtract_bg().clip(0).plot(ratio=2).show()
-    print("Press return to exit")

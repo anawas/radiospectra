@@ -1,13 +1,10 @@
-# -*- coding: utf-8 -*-
-from __future__ import absolute_import, division, print_function
-
 import os
 import datetime
 
 import numpy as np
 
 from radiospectra.spectrogram import REFERENCE, LinearTimeSpectrogram
-from radiospectra.util import get_day, ConditionalDispatch
+from radiospectra.util import ConditionalDispatch, get_day
 
 __all__ = ['SWavesSpectrogram']
 
@@ -61,13 +58,13 @@ class SWavesSpectrogram(LinearTimeSpectrogram):
         super(SWavesSpectrogram, self).__init__(
             data, time_axis, freq_axis, start, end,
             t_init, t_delt, t_label, f_label,
-            content, set(["SWAVES"])
+            content, {"SWAVES"}
         )
         self.bg = bg
 
 
 try:
-    SWavesSpectrogram.create.im_func.__doc__ = (
+    SWavesSpectrogram.create.__func__.__doc__ = (
         """ Create SWavesSpectrogram from given input dispatching to the
         appropriate from_* function.
 
@@ -82,8 +79,3 @@ except AttributeError:
     Possible signatures:
 
     """ + SWavesSpectrogram._create.generate_docs())
-
-if __name__ == "__main__":
-    opn = SWavesSpectrogram.read("/home/florian/swaves_average_20120705_a_hfr.dat")
-    opn.plot(min_=0, linear=False).show()
-    print("Press return to exit")

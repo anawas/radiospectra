@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-# Author: Florian Mayer <florian.mayer@bitsrc.org>
 """
 Offer a callable object that dispatches based on arbitrary conditions and
 function signature. That means, whenever it is called, it finds the registered
@@ -71,18 +69,18 @@ Traceback (most recent call last):
     "There are no functions matching your input parameter "
 TypeError: There are no functions matching your input parameter signature.
 """
-from __future__ import absolute_import, division, print_function
 
-import sys
-import inspect
-from itertools import chain, repeat
-from datetime import datetime
-import glob
+
 import os
-
-from sunpy.util.net import download_file
+import glob
+import inspect
+from datetime import datetime
+from itertools import chain, repeat
 
 import numpy as np
+
+from sunpy.util.config import get_and_create_download_dir
+from sunpy.util.net import download_file
 
 __all__ = ['run_cls', 'matches_types', 'arginize', 'correct_argspec',
            'matches_signature', 'ConditionalDispatch', 'fmt_argspec_types',
@@ -104,9 +102,9 @@ def merge(items, key=(lambda x: x)):
             state[item] = (first, key(first))
 
     while state:
-        for item, (value, tk) in state.items():
+        for item, (value, tk) in list(state.items()):
             # Value is biggest.
-            if all(tk >= k for it, (v, k) in state.items()
+            if all(tk >= k for it, (v, k) in list(state.items())
                    if it is not item):
                 yield value
                 break
@@ -144,7 +142,7 @@ def to_signed(dtype):
     if dtype.kind == "u":
         if dtype.itemsize == 8:
             raise ValueError("Cannot losslessly convert uint64 to int.")
-        dtype = "int{0:d}".format(min(dtype.itemsize * 2 * 8, 64))
+        dtype = "int{:d}".format(min(dtype.itemsize * 2 * 8, 64))
     return np.dtype(dtype)
 
 
@@ -195,9 +193,9 @@ def minimal_pairs(one, other):
 
 def run_cls(name):
     """
-    run_cls("foo")(cls, *args, **kwargs) -> cls.foo(*args, **kwargs)
+    run_cls("foo")(cls, \\*args, \\**kwargs) -> cls.foo(\\*args, \\**kwargs)
     """
-    fun = lambda cls, *args, **kwargs: getattr(cls, name)(*args, **kwargs)
+    fun = lambda cls, *args, **kwargs: getattr(cls, name)(*args, **kwargs)  # NOQA
     fun.__name__ = str(name)
     fun.run_cls = True
     return fun
@@ -211,9 +209,9 @@ def matches_types(fun, types, args, kwargs):
     kwargs are automatically converted into that order.
     """
     return all(
-        isinstance(obj, cls) for obj, cls in zip(
+        isinstance(obj, cls) for obj, cls in list(zip(
             arginize(fun, args, kwargs), types
-        )
+        ))
     )
 
 
@@ -227,7 +225,7 @@ def arginize(fun, a, kw):
         raise ValueError
     names = args[len(a):]
     if defaults:
-        defs = dict(zip(args[-len(defaults):], defaults))
+        defs = dict(list(zip(args[-len(defaults):], defaults)))
     else:
         defs = {}
     return list(a) + [kw.get(name, defs.get(name, None)) for name in names]
@@ -237,11 +235,8 @@ def correct_argspec(fun):
     """
     Remove first argument if method is bound.
     """
-    if sys.version_info[0] >= 3:
-        fullargspec = inspect.getfullargspec(fun)
-        args, varargs, keywords, defaults = fullargspec[0], fullargspec[1], fullargspec[2], fullargspec[3]
-    else:
-        args, varargs, keywords, defaults = inspect.getargspec(fun)
+    fullargspec = inspect.getfullargspec(fun)
+    args, varargs, keywords, defaults = fullargspec[0], fullargspec[1], fullargspec[2], fullargspec[3]
     if inspect.ismethod(fun):
         args = args[1:]
     return args, varargs, keywords, defaults
@@ -318,13 +313,13 @@ class ConditionalDispatch(object):
         matched = False
         for fun, condition, types in self.funcs:
             if (matches_signature(condition, args, kwargs) and
-                (types is None or matches_types(condition, types, args, kwargs))):
+                    (types is None or matches_types(condition, types, args, kwargs))):
                 matched = True
                 if condition(*args, **kwargs):
                     return fun(*args, **kwargs)
         for fun, types in self.nones:
             if (matches_signature(fun, args, kwargs) and
-                (types is None or matches_types(fun, types, args, kwargs))):
+                    (types is None or matches_types(fun, types, args, kwargs))):
                 return fun(*args, **kwargs)
 
         if matched:
@@ -360,9 +355,10 @@ class ConditionalDispatch(object):
             else:
                 args, varargs, keywords, defaults = correct_argspec(condition)
                 args = args[st:]
-                yield prefix + inspect.formatargspec(
-                    args, varargs, keywords, defaults
-                )
+                sig_str = str(inspect.signature(fun))
+                if sig_str == '(cls, *args, **kwargs)':
+                    sig_str = '(cls, \\*args, \\**kwargs)'
+                yield prefix + sig_str
 
         for fun, types in self.nones:
             if types is not None:
@@ -370,18 +366,18 @@ class ConditionalDispatch(object):
             else:
                 args, varargs, keywords = correct_argspec(condition)
                 args = args[st:]
-                yield prefix + inspect.formatargspec(
-                    args, varargs, keywords, defaults
-                )
+                if sig_str == '(cls, *args, **kwargs)':
+                    sig_str = '(cls, \\*args, \\**kwargs)'
+                yield prefix + sig_str
 
     def generate_docs(self):
         fns = (item[0] for item in chain(self.funcs, self.nones))
-        return '\n\n'.join("{0} -> :py:meth:`{1}`".format(sig, fun.__name__)
-            for sig, fun in
-            # The 1 prevents the cls from incorrectly being shown in the
-            # documentation.
-            zip(self.get_signatures("create", -1), fns)
-        )
+        return '\n\n    '.join("{} -> :meth:`{}`".format(sig, fun.__name__)
+                               for sig, fun in
+                               # The 1 prevents the cls from incorrectly being shown in the
+                               # documentation.
+                               list(zip(self.get_signatures("create", -1), fns))
+                               )
 
 
 def fmt_argspec_types(fun, types, start=0):
@@ -402,9 +398,9 @@ def fmt_argspec_types(fun, types, start=0):
         if isinstance(type_, tuple) and len(type_) == 1:
             type_ = type_[0]
         if value is NULL:
-            spec.append("{0}: {1}".format(key, type_.__name__))
+            spec.append("{}: {}".format(key, type_.__name__))
         else:
-            spec.append("{0}: {1} = {2}".format(key, type_.__name__, value))
+            spec.append("{}: {} = {}".format(key, type_.__name__, value))
     if varargs is not None:
         spec.append('*{!s}'.format(varargs))
     if keywords is not None:
@@ -437,7 +433,7 @@ class Parent(object):
         """
         matches = glob.glob(os.path.expanduser(singlepattern))
         if len(matches) != 1:
-            raise ValueError("Invalid number of matches: {0:d}".format(len(matches)))
+            raise ValueError("Invalid number of matches: {:d}".format(len(matches)))
         return cls.read(matches[0])
 
     @classmethod
@@ -458,7 +454,7 @@ class Parent(object):
         """ Return list that contains all files in the directory read in. """
         directory = os.path.expanduser(directory)
         return cls.read_many(
-            (os.path.join(directory, elem) for elem in os.listdir(directory))
+            os.path.join(directory, elem) for elem in os.listdir(directory)
         )
 
     @classmethod
@@ -492,7 +488,7 @@ Parent._create.add(
     run_cls('from_single_glob'),
     lambda cls, singlepattern: ('*' in singlepattern and
                                 len(glob.glob(
-                                os.path.expanduser(singlepattern))) == 1),
+                                    os.path.expanduser(singlepattern))) == 1),
     [type, str], check=False
 )
 # This case only gets executed under the condition that the previous one wasn't.
@@ -502,7 +498,7 @@ Parent._create.add(
     run_cls('from_glob'),
     lambda cls, pattern: '*' in pattern and glob.glob(
         os.path.expanduser(pattern)
-        ),
+    ),
     [type, str], check=False
 )
 Parent._create.add(

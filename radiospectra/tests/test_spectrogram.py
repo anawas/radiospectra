@@ -1,15 +1,9 @@
-# -*- coding: utf-8 -*-
-# Author: Florian Mayer <florian.mayer@bitsrc.org>
-
-from __future__ import absolute_import, print_function
-
 from datetime import datetime
 
 import numpy as np
 import pytest
 from numpy.testing import assert_array_almost_equal
 
-from ..extern.six.moves import range
 from ..spectrogram import LinearTimeSpectrogram, Spectrogram, _LinearView
 
 

@@ -1,8 +1,6 @@
-# -*- coding: utf-8 -*-
 """
 Classes for spectral analysis.
 """
-from __future__ import absolute_import, division, print_function
 
 import datetime
 from copy import copy
@@ -25,9 +23,8 @@ import ruptures as rpt
 from sunpy import __version__
 from sunpy.time import parse_time
 
-from radiospectra.extern.six.moves import range, zip
 from radiospectra.spectrum import Spectrum
-from radiospectra.util import get_day, ConditionalDispatch, common_base, merge, to_signed, Parent
+from radiospectra.util import ConditionalDispatch, Parent, common_base, get_day, merge, to_signed
 
 __all__ = ['Spectrogram', 'LinearTimeSpectrogram']
 
@@ -345,9 +342,9 @@ class Spectrogram(Parent):
         """
         Implementation detail.
         """
-        return dict(
-            (name, getattr(self, name)) for name, _ in self.COPY_PROPERTIES
-        )
+        return {
+            name: getattr(self, name) for name, _ in self.COPY_PROPERTIES
+        }
 
     def _slice(self, y_range, x_range):
         """
@@ -531,7 +528,6 @@ class Spectrogram(Parent):
         params.update(matplotlib_args)
         if linear and max_dist is not None:
             toplot = ma.masked_array(data, mask=data.make_mask(max_dist))
-            pass
         else:
             toplot = data
         im = axes.imshow(toplot, **params)
@@ -685,7 +681,7 @@ class Spectrogram(Parent):
         sdevs = np.asarray(np.std(tmp, 0))
 
         # Get indices of values with lowest standard deviation.
-        cand = sorted(range(self.shape[1]), key=lambda y: sdevs[y])
+        cand = sorted(list(range(self.shape[1])), key=lambda y: sdevs[y])
         # Only consider the best 5 %.
         return cand[:max(1, int(amount * len(cand)))]
 
@@ -1090,7 +1086,7 @@ class Spectrogram(Parent):
         sdevs = np.asarray(np.std(tmp, 0))
 
         # Get indices of values with lowest standard deviation.
-        cand = sorted(range(amount), key=lambda y: sdevs[y])
+        cand = sorted(list(range(amount)), key=lambda y: sdevs[y])
         # Only consider the best 5 %.
         realcand = cand[:max(1, int(0.05 * len(cand)))]
 
@@ -1198,7 +1194,8 @@ class Spectrogram(Parent):
         if delta_freq is None:
             # Nyquist–Shannon sampling theorem
             delta_freq = _min_delt(self.freq_axis) / 2.
-        nsize = (self.freq_axis.max() - self.freq_axis.min()) / delta_freq + 1
+        nsize = int((self.freq_axis.max() - self.freq_axis.min()) /
+                    delta_freq + 1)
         new = np.zeros((int(nsize), self.shape[1]), dtype=self.data.dtype)
 
         freqs = self.freq_axis - self.freq_axis.max()
@@ -1277,7 +1274,7 @@ class Spectrogram(Parent):
             else:
                 pixel = ""
 
-            return '{0!s} z={1!s}'.format(fmt_coord(x, y), pixel)
+            return '{!s} z={!s}'.format(fmt_coord(x, y), pixel)
 
         return format_coord
 
