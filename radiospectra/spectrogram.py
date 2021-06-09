@@ -1019,13 +1019,13 @@ class Spectrogram(Parent):
         """
         image = self.data.copy()
 
-        nx = len(image[:, 0])
-        ny = len(image[0, :])
+        nx = len(image[0, :])
+        ny = len(image[:, 0])
 
-        w_len_half = int(len(image) / 2)
+        w_len_half = int(3 / 2)
         w_len = w_len_half * 2 + 1
 
-        backgr = np.zeros((nx, ny), dtype=np.float)
+        backgr = np.zeros((ny, nx), dtype=np.float)
 
         # i is of type float!
         i = 0
@@ -1034,27 +1034,27 @@ class Spectrogram(Parent):
             coeffs = w_len_half - np.arange(0, w_len_half, dtype=np.float)
             sum = np.sum(coeffs)
             while i < w_len_half:
-                backgr[i, :] = np.sum(coeffs * image[0:w_len_half + i - 1, :]) / sum
-                backgr[nx - i - 1, :] = np.sum(coeffs[::-1] * image[nx - i - 1:nx - 1, :]) / sum
+                backgr[:, i] = np.sum(coeffs * image[:, 0:w_len_half + i - 1]) / sum
+                backgr[:, nx - i - 1] = np.sum(coeffs[::-1] * image[:, nx - i - 1:nx - 1]) / sum
                 i += 1
                 coeffs = [w_len_half - i, coeffs]
                 sum = sum + coeffs[i]
 
             while i < nx - w_len_half:
-                backgr[i, :] = np.sum(coeffs * image[i - w_len_half:i + w_len_half, :]) / sum
+                backgr[:, i] = np.sum(coeffs * image[:, i - w_len_half:i + w_len_half]) / sum
                 i += 1
         else:
             while i < w_len_half + 1:
-                backgr[i, :] = np.average(image[0:(i + w_len_half) < (nx - 1), :], 0)
+                backgr[:, i] = np.average(image[:, 0:min(i + w_len_half, nx)] + 1, 1)
                 i += 1
 
             i = w_len_half + 1
             while i < nx - w_len_half:
-                backgr[i, :] = backgr[i - 1, :] + (image[i + w_len_half, :]) - image[i - 1 - w_len_half, :] / w_len
+                backgr[:, i] = backgr[:, i - 1] + (image[:, i + w_len_half]) - image[:, i - 1 - w_len_half] / w_len
                 i += 1
 
             while i <= nx - 1:
-                backgr[i, :] = np.average(image[i:nx - 1, :], 0)
+                backgr[:, i] = np.average(image[:, i:nx], 0)
                 i += 1
 
         if overwrite:
