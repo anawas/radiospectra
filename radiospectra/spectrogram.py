@@ -897,7 +897,7 @@ class Spectrogram(Parent):
         Parameters
         ----------
         overwrite : bool
-            If function constbacksub has been called directly, there will be a possibilty to overwrite it's current
+            If function constbacksub has been called directly, there will be a possibility to overwrite it's current
             spectrogram data
         """
         im = self.data.copy()
@@ -935,7 +935,7 @@ class Spectrogram(Parent):
         Parameters
         ----------
         overwrite : bool
-            If function elimwrongchannels has been called directly, there will be a possibilty to overwrite it's current
+            If function elimwrongchannels has been called directly, there will be a possibility to overwrite it's current
             spectrogram data
         """
         im = self.data.copy()
@@ -1004,17 +1004,19 @@ class Spectrogram(Parent):
                 rfi_freq_axis = np.concatenate((rfi_freq_axis[:idx], [curr_freq], rfi_freq_axis[idx:]))
         return rfi_freq_axis
 
-    def glid_back_sub(self, weighted=None, overwrite=True):
+    def glid_back_sub(self, window_width=0, weighted=False, overwrite=True):
         """
         A gliding background subtraction method, where the sum weighted from the
         coefficients of the evenly spaces values of each row will be subtracted from the spectrogram.
 
         Parameters
         ----------
+        window_width: int
+            The width of the sliding window that is used to calculate the background.
         weighted : bool
             If true, the coefficients of each rows will be considered dependent on the image width.
         overwrite : bool
-            If function glid_back_sub has been called directly, there will be a possibilty to overwrite it's current
+            If function glid_back_sub has been called directly, there will be a possibility to overwrite it's current
             spectrogram data
         """
         image = self.data.copy()
@@ -1022,15 +1024,18 @@ class Spectrogram(Parent):
         nx = len(image[0, :])
         ny = len(image[:, 0])
 
-        w_len_half = int(3 / 2)
-        w_len = w_len_half * 2 + 1
+        if window_width == 0:
+            w_len_half = int(image.shape[1] / 2)
+        else:
+            w_len_half = int(window_width / 2)
+        w_len = w_len_half * 2
 
         backgr = np.zeros((ny, nx), dtype=np.float)
 
         # i is of type float!
         i = 0
 
-        if weighted is not None:
+        if weighted:
             coeffs = w_len_half - np.arange(0, w_len_half, dtype=np.float)
             sum = np.sum(coeffs)
             while i < w_len_half:
@@ -1050,11 +1055,11 @@ class Spectrogram(Parent):
 
             i = w_len_half + 1
             while i < nx - w_len_half:
-                backgr[:, i] = backgr[:, i - 1] + (image[:, i + w_len_half]) - image[:, i - 1 - w_len_half] / w_len
+                backgr[:, i] = backgr[:, i - 1] + (image[:, i + w_len_half] - image[:, i - 1 - w_len_half]) / w_len
                 i += 1
 
             while i <= nx - 1:
-                backgr[:, i] = np.average(image[:, i:nx], 0)
+                backgr[:, i] = np.average(image[:, i:nx], 1)
                 i += 1
 
         if overwrite:
