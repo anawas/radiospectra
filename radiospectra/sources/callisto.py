@@ -267,8 +267,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         data = np.ma.array(fl[0].data, dtype=cls.ARRAY_TYPE, mask=np.full(fl[0].data.shape, False))
         data.mask[np.where(np.isnan(data.data))] = True
 
-        axes = fl[1]
         header = fl[0].header
+
+        # not every fits file does provide axes in their header file
+        axes = None
+        if len(fl) != 1:
+            axes = fl[1]
 
         modified = False
         # simple patch for TIME-END issue
@@ -316,6 +320,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
         # Table may contain the axes data. If it does, the other way of doing
         # it might be very wrong.
+        tm = None
+        fq = None
         if axes is not None:
             try:
                 # It's not my fault. Neither supports __contains__ nor .get
@@ -332,14 +338,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             time_axis = np.squeeze(tm)
         else:
             # Otherwise, assume it's linear.
-            time_axis = \
-                np.linspace(0, data.shape[1] - 1) * t_delt + t_init  # pylint: disable=E1101
+            time_axis = np.linspace(0, data.shape[1] - 1, num=data.shape[1]) * t_delt + t_init  # pylint: disable=E1101
 
         if fq is not None:
             freq_axis = np.squeeze(fq)
         else:
-            freq_axis = \
-                np.linspace(0, data.shape[0] - 1) * f_delt + f_init  # pylint: disable=E1101
+            freq_axis = np.linspace(0, data.shape[0] - 1, num=data.shape[0]) * f_delt + f_init  # pylint: disable=E1101
 
         # Remove duplicate entries on the borders
         left = 1
@@ -369,11 +373,15 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         content = header["CONTENT"]
         instruments = {header["INSTRUME"]}
 
+        axes_header = None
+        if axes:
+            axes_header = axes.header
+
         fl.close()
         return cls(
             data, time_axis, freq_axis, start, end, t_init, t_delt,
             t_label, f_label, content, instruments,
-            header, axes.header, swapped, filename
+            header, axes_header, swapped, filename
         )
 
     def __init__(self, data, time_axis, freq_axis, start, end,
@@ -888,7 +896,6 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         merged_spec.header["DATAMIN"] = merged_matrix.min()
         merged_spec.header["DATAMAX"] = merged_matrix.max()
         return merged_spec
-
 
     def remove_single_freq_rfi(self, threshold=17, row_window_height=3):
         """
