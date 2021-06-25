@@ -1039,14 +1039,26 @@ class Spectrogram(Parent):
             coeffs = w_len_half - np.arange(0, w_len_half, dtype=np.float)
             sum = np.sum(coeffs)
             while i < w_len_half:
-                backgr[:, i] = np.sum(coeffs * image[:, 0:w_len_half + i - 1]) / sum
-                backgr[:, nx - i - 1] = np.sum(coeffs[::-1] * image[:, nx - i - 1:nx - 1]) / sum
+                img_data = image[:, 0:w_len_half + i].flatten()
+                min_array_size = min(coeffs.size, img_data.size)
+                coeffs_sum = np.multiply(img_data[0:min_array_size], coeffs[0:min_array_size])
+                backgr[:, i] = np.sum(coeffs_sum) / sum
+
+                img_data = image[:, nx - i - 1:nx].flatten()
+                flipped_coeffs = coeffs[::-1]
+                min_array_size = min(flipped_coeffs.size, img_data.size)
+                coeffs_sum = np.multiply(img_data[0:min_array_size], flipped_coeffs[0:min_array_size])
+
+                backgr[:, nx - i - 1] = np.sum(coeffs_sum) / sum
                 i += 1
-                coeffs = [w_len_half - i, coeffs]
+                coeffs = np.insert(coeffs, 0, w_len_half - i)
                 sum = sum + coeffs[i]
 
             while i < nx - w_len_half:
-                backgr[:, i] = np.sum(coeffs * image[:, i - w_len_half:i + w_len_half]) / sum
+                img_data = image[:, i - w_len_half:i + w_len_half].flatten()
+                min_array_size = min(coeffs.size, img_data.size)
+                coeffs_sum = np.multiply(img_data[0:min_array_size], coeffs[0:min_array_size])
+                backgr[:, i] = np.sum(coeffs_sum) / sum
                 i += 1
         else:
             while i < w_len_half + 1:
