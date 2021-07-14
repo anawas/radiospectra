@@ -338,7 +338,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             time_axis = np.squeeze(tm)
         else:
             # Otherwise, assume it's linear.
-            time_axis = np.linspace(0, data.shape[1] - 1, num=data.shape[1]) * t_delt + t_init  # pylint: disable=E1101
+            time_axis = np.linspace(0, data.shape[1] - 1, num=data.shape[1]) * t_delt  # pylint: disable=E1101
 
         if fq is not None:
             freq_axis = np.squeeze(fq)
