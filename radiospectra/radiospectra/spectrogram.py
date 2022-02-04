@@ -1149,10 +1149,10 @@ class Spectrogram(Parent):
         """
         # pylint: disable=E1101
         if vmin is None:
-            vmin = int(self.data.min())
+            vmin = int(np.nanmin(self.data))
 
         if vmax is None:
-            vmax = int(self.data.max())
+            vmax = int(np.nanmax(self.data))
 
         return self._with_data(self.data.clip(vmin, vmax, out))
 
