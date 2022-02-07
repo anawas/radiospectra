@@ -1,3 +1,4 @@
+import gzip
 from pathlib import Path
 from unittest import mock
 
@@ -5,11 +6,14 @@ import numpy as np
 import pytest
 
 import astropy.units as u
+import sunpy
 from astropy.time import Time
 from sunpy.net import Fido
 from sunpy.net import attrs as a
 
 from radiospectra.net.sources.psp import RFSClient
+
+MOCK_PATH = "sunpy.net.scraper.urlopen" if sunpy.__version__ >= "3.1.0" else "sunpy.util.scraper.urlopen"
 
 
 @pytest.fixture
@@ -51,15 +55,15 @@ def test_fido():
 
 @pytest.fixture
 def http_responces():
-    paths = [Path(__file__).parent / 'data' / n for n in ['resp1.html', 'resp2.html']]
+    paths = [Path(__file__).parent / 'data' / n for n in ['psp_resp1.html.gz', 'psp_resp2.html.gz']]
     response_htmls = []
     for p in paths:
-        with p.open('r') as f:
+        with gzip.open(p) as f:
             response_htmls.append(f.read())
     return response_htmls
 
 
-@mock.patch('sunpy.util.scraper.urlopen')
+@mock.patch(MOCK_PATH)
 def test_search_with_wavelength(mock_urlopen, client, http_responces):
     mock_urlopen.return_value.read = mock.MagicMock()
     mock_urlopen.return_value.read.side_effect = http_responces
@@ -106,7 +110,7 @@ def test_can_handle_query(client):
 
 
 @pytest.mark.remote_data
-def test_get(client):
-    query = client.search(a.Time('2019/10/05', '2019/10/10'), a.Instrument('rfr'))
+def test_download(client):
+    query = client.search(a.Time('2019/10/05', '2019/10/06'), a.Instrument('rfs'))
     download_list = client.fetch(query)
     assert len(download_list) == len(query)
