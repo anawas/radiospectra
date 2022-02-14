@@ -453,7 +453,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         return objs
 
     @classmethod
-    def from_range(cls, instrument, start, end, exact=False):
+    def from_range(cls, instrument, start, end, exact: bool = False, distribution: int = 1):
         """
         Automatically download data from instrument between start and end and
         join it together.
@@ -468,7 +468,31 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             end of the measurement
         exact : bool
             return data only for the requested time interval
+        distribution : int
+            extend data start-end so, that the data can be changed in such a way that n pieces (minutes)
+            with the same duration distribution will be obtained. Only apply if 'exact' parameter is True.
         """
+
+        def missing_nan_data(_start, _end, freq_axis_len, time_steps=4):
+            """
+            Create a numpy array whit missing_nan_data for fill in CallistoSpectrogram data.
+
+            Parameters
+            ----------
+            _start : `~datetime` compatible
+                start of the interval
+            _end : `~datetime` compatible
+                end of the interval
+            freq_axis_len : int
+                len of the freq_axis of the CallistoSpectrogram object
+            time_steps: int
+                spec time_axis property step count inside 1 min.
+            """
+            diference = int(math.ceil(
+                ((_end - _start).total_seconds() / DATA_SIZE.total_seconds())
+            ) * DATA_SIZE.total_seconds())
+            nan_shape = (freq_axis_len, diference * time_steps)
+            return np.full(nan_shape, np.nan)
 
         if SUNPY_LT_1:
             start = parse_time(start)
@@ -476,7 +500,21 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         else:
             start = parse_time(start).datetime
             end = parse_time(end).datetime
+
         urls = query(start, end, [instrument])
+
+        # Do it using next
+        urls = list(urls)
+        url = urls[0]
+        inst, no, dstart = parse_filename(url.split('/')[-1])
+
+        if dstart.replace(microsecond=0) > start and start.hour < 1 and start.minute < 15:
+            # If start hour:min < 00:15 start from 15 min less because many times 00:00 start from midnight - 1 min
+            # So, update url list files with the previous file
+            aux_start = start - datetime.timedelta(minutes=15)
+            new_urls = list(query(aux_start, end, [instrument]))
+            urls = new_urls + urls if len(new_urls) > 0 else urls
+
         data = list(map(cls.from_url, urls))
         freq_buckets = defaultdict(list)
         for elem in data:
@@ -486,12 +524,47 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 [cls.new_join_many(elem) for elem in freq_buckets.values()]
             )
 
+            spec.start = spec.start.replace(microsecond=0)
+            spec.end = spec.end.replace(microsecond=0)
+
+            if exact or spec.start.replace(microsecond=0) > start or spec.end.replace(microsecond=0) < end:
+                step = spec.time_axis[1]
+
+            if spec.start.replace(microsecond=0) > start:
+                # There isn't data between spec.start and the requested start datetime
+                # Fill whit np.nan values and update spec attributes
+                nan_data = missing_nan_data(start, spec.start, len(spec.freq_axis), int(1 / step))
+                spec.data = np.concatenate((nan_data, spec.data), axis=1)
+                spec.start = start
+                spec.time_axis = np.arange(
+                    start=0.0, stop=len(spec.time_axis) + nan_data.shape[-1], step=step
+                )
+
+            if spec.end.replace(microsecond=0) < end:
+                # There isn't data between spec.end and the requested end datetime
+                # Fill whit np.nan values and update spec attributes
+                nan_data = missing_nan_data(spec.end, end, len(spec.freq_axis), int(1 / step))
+                spec.data = np.concatenate((spec.data, nan_data), axis=1)
+                spec.end = end
+                spec.time_axis = np.arange(
+                    start=0.0, stop=len(spec.time_axis) + nan_data.shape[-1], step=step
+                )
+
             if exact:
                 start_difference = (start - spec.start).total_seconds()
                 end_difference = (end - start).total_seconds()
+                from_start = int(start_difference * 1 / step)
 
-                from_start = int(start_difference * 2)
-                to_end = int(from_start + end_difference * 2)
+                if distribution > 1:
+                    remainder, quotient = math.modf(end_difference / DATA_SIZE.total_seconds())
+
+                    if quotient > 1:
+                        end_difference = quotient * DATA_SIZE.total_seconds()
+
+                    if remainder > 0:
+                        end_difference += DATA_SIZE.total_seconds()
+
+                to_end = int(from_start + end_difference * 1 / step)
 
                 spec.time_axis = spec.time_axis[from_start: to_end]
                 spec.data = spec.data[:, from_start: to_end]
