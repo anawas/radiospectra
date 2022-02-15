@@ -453,7 +453,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         return objs
 
     @classmethod
-    def from_range(cls, instrument, start, end, exact: bool = False, distribution: int = 1):
+    def from_range(cls, instrument, start, end, exact: bool = False, distribution: int = 0):
         """
         Automatically download data from instrument between start and end and
         join it together.
@@ -505,15 +505,17 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
         # Do it using next
         urls = list(urls)
-        url = urls[0]
-        inst, no, dstart = parse_filename(url.split('/')[-1])
 
-        if dstart.replace(microsecond=0) > start and start.hour < 1 and start.minute < 15:
-            # If start hour:min < 00:15 start from 15 min less because many times 00:00 start from midnight - 1 min
-            # So, update url list files with the previous file
-            aux_start = start - datetime.timedelta(minutes=15)
-            new_urls = list(query(aux_start, end, [instrument]))
-            urls = new_urls + urls if len(new_urls) > 0 else urls
+        if len(urls) > 0:
+            url = urls[0]
+            inst, no, dstart = parse_filename(url.split('/')[-1])
+
+            if dstart.replace(microsecond=0) > start and start.hour < 1 and start.minute < 15:
+                # If start hour:min < 00:15 start from 15 min less because many times 00:00 start from midnight - 1 min
+                # So, update url list files with the previous file
+                aux_start = start - datetime.timedelta(minutes=15)
+                new_urls = list(query(aux_start, end, [instrument]))
+                urls = new_urls + urls if len(new_urls) > 0 else urls
 
         data = list(map(cls.from_url, urls))
         freq_buckets = defaultdict(list)
@@ -527,10 +529,10 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             spec.start = spec.start.replace(microsecond=0)
             spec.end = spec.end.replace(microsecond=0)
 
-            if exact or spec.start.replace(microsecond=0) > start or spec.end.replace(microsecond=0) < end:
+            if exact or spec.start > start or spec.end < end:
                 step = spec.time_axis[1]
 
-            if spec.start.replace(microsecond=0) > start:
+            if spec.start > start:
                 # There isn't data between spec.start and the requested start datetime
                 # Fill whit np.nan values and update spec attributes
                 nan_data = missing_nan_data(start, spec.start, len(spec.freq_axis), int(1 / step))
@@ -540,7 +542,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                     start=0.0, stop=len(spec.time_axis) + nan_data.shape[-1], step=step
                 )
 
-            if spec.end.replace(microsecond=0) < end:
+            if spec.end < end:
                 # There isn't data between spec.end and the requested end datetime
                 # Fill whit np.nan values and update spec attributes
                 nan_data = missing_nan_data(spec.end, end, len(spec.freq_axis), int(1 / step))
@@ -551,6 +553,9 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 )
 
             if exact:
+                spec.start = start
+                spec.end = end
+
                 start_difference = (start - spec.start).total_seconds()
                 end_difference = (end - start).total_seconds()
                 from_start = int(start_difference * 1 / step)
@@ -558,11 +563,14 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 if distribution > 1:
                     remainder, quotient = math.modf(end_difference / DATA_SIZE.total_seconds())
 
-                    if quotient > 1:
+                    if quotient == 0:
+                        end_difference = DATA_SIZE.total_seconds()
+                    else:
                         end_difference = quotient * DATA_SIZE.total_seconds()
+                        if remainder > 0:
+                            end_difference += DATA_SIZE.total_seconds()
 
-                    if remainder > 0:
-                        end_difference += DATA_SIZE.total_seconds()
+                    spec.end = spec.start + datetime.timedelta(seconds=end_difference)
 
                 to_end = int(from_start + end_difference * 1 / step)
 

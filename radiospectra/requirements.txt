@@ -1,0 +1,14 @@
+astropy>=3.2.1
+bs4
+extension_helpers
+numpy>=1.11
+scikit-image
+scipy
+sunpy>=1.0.2
+# Dev
+pytest
+# Docs
+sphinx
+sunpy_sphinx_theme
+sortedcontainers
+ruptures
