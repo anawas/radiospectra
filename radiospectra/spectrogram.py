@@ -11,6 +11,7 @@ from typing import Union, List
 
 import numpy as np
 from skimage import filters
+import matplotlib
 from matplotlib import pyplot as plt
 from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
@@ -462,7 +463,7 @@ class Spectrogram(Parent):
 
     def plot(self, figure=None, overlays=[], colorbar=True, vmin=None,
              vmax=None, linear=True, showz=True, yres=DEFAULT_YRES,
-             max_dist=None, **matplotlib_args):
+             max_dist=None, nan_color='black', **matplotlib_args):
         """
         Plot spectrogram onto figure.
 
@@ -494,6 +495,8 @@ class Spectrogram(Parent):
             If not None, mask elements that are further than max_dist away
             from actual data points (ie, frequencies that actually have data
             from the receiver and are not just nearest-neighbour interpolated).
+        nan_color: str
+            Matplotlib color for nan values inside data. Default value is black.
         """
         # [] as default argument is okay here because it is only read.
         # pylint: disable=W0102,R0914
@@ -530,6 +533,10 @@ class Spectrogram(Parent):
             toplot = ma.masked_array(data, mask=data.make_mask(max_dist))
         else:
             toplot = data
+
+        current_cmap = matplotlib.cm.get_cmap()
+        current_cmap.set_bad(color=nan_color)
+
         im = axes.imshow(toplot, **params)
 
         xa = axes.get_xaxis()
@@ -1142,10 +1149,10 @@ class Spectrogram(Parent):
         """
         # pylint: disable=E1101
         if vmin is None:
-            vmin = int(self.data.min())
+            vmin = int(np.nanmin(self.data))
 
         if vmax is None:
-            vmax = int(self.data.max())
+            vmax = int(np.nanmax(self.data))
 
         return self._with_data(self.data.clip(vmin, vmax, out))
 
