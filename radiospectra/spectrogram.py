@@ -8,7 +8,7 @@ from math import floor
 from random import randint
 from distutils.version import LooseVersion
 from typing import Union, List
-
+import matplotlib
 import numpy as np
 from skimage import filters
 from matplotlib import pyplot as plt
@@ -256,12 +256,14 @@ class TimeFreq(object):
 
         return figure
 
-    def peek(self, *args, **kwargs):
+    def peek(self, show=True, *args, **kwargs):
         """
         Plot spectrum onto current axes.
 
         Parameters
         ----------
+        show: bool
+            if plot or nod the image. Default True
         *args : dict
 
         **kwargs : dict
@@ -275,7 +277,9 @@ class TimeFreq(object):
         """
         plt.figure()
         ret = self.plot(*args, **kwargs)
-        plt.show()
+        if show:
+            plt.show()
+        plt.close()
         return ret
 
 
@@ -462,7 +466,7 @@ class Spectrogram(Parent):
 
     def plot(self, figure=None, overlays=[], colorbar=True, vmin=None,
              vmax=None, linear=True, showz=True, yres=DEFAULT_YRES,
-             max_dist=None, **matplotlib_args):
+             max_dist=None, nancolor='black', **matplotlib_args):
         """
         Plot spectrogram onto figure.
 
@@ -494,6 +498,8 @@ class Spectrogram(Parent):
             If not None, mask elements that are further than max_dist away
             from actual data points (ie, frequencies that actually have data
             from the receiver and are not just nearest-neighbour interpolated).
+        nancolor: str
+            compatible color with matplotlib for nan values
         """
         # [] as default argument is okay here because it is only read.
         # pylint: disable=W0102,R0914
@@ -530,6 +536,10 @@ class Spectrogram(Parent):
             toplot = ma.masked_array(data, mask=data.make_mask(max_dist))
         else:
             toplot = data
+
+        current_cmap = matplotlib.cm.get_cmap()
+        current_cmap.set_bad(color=nancolor)
+
         im = axes.imshow(toplot, **params)
 
         xa = axes.get_xaxis()
@@ -1142,10 +1152,10 @@ class Spectrogram(Parent):
         """
         # pylint: disable=E1101
         if vmin is None:
-            vmin = int(self.data.min())
+            vmin = int(np.nanmin(self.data))
 
         if vmax is None:
-            vmax = int(self.data.max())
+            vmax = int(np.nanmax(self.data))
 
         return self._with_data(self.data.clip(vmin, vmax, out))
 
