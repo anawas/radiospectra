@@ -501,24 +501,15 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             start = parse_time(start).datetime
             end = parse_time(end).datetime
 
-        urls = query(start, end, [instrument])
+        # Adding 1 spectrogram more ad the beginning and end
+        if exact:
+            aux_start = (start - datetime.timedelta(minutes=15)).replace(microsecond=0)
+            aux_end = (end + datetime.timedelta(minutes=15)).replace(microsecond=0)
+        else:
+            aux_start = start
+            aux_end = end
 
-        # Do it using next
-        urls = list(urls)
-
-        update_start = False
-
-        if len(urls) > 0:
-            url = urls[0]
-            inst, no, dstart = parse_filename(url.split('/')[-1])
-
-            if dstart.replace(microsecond=0) > start and start.hour < 1 and start.minute < 15:
-                # If start hour:min < 00:15 start from 15 min less because many times 00:00 start from midnight - 1 min
-                # So, update url list files with the previous file
-                aux_start = start - datetime.timedelta(minutes=15)
-                new_urls = list(query(aux_start, end, [instrument]))
-                urls = new_urls + urls if len(new_urls) > 0 else urls
-                update_start = True
+        urls = query(aux_start, aux_end, [instrument])
 
         data = list(map(cls.from_url, urls))
         freq_buckets = defaultdict(list)
@@ -529,45 +520,36 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 [cls.new_join_many(elem) for elem in freq_buckets.values()]
             )
 
-            spec.start = spec.start.replace(microsecond=0)
-            spec.end = spec.end.replace(microsecond=0)
-
-            if update_start or exact or spec.start > start or spec.end < end:
-                step = spec.time_axis[1]
-
-            if spec.start > start:
-                # There isn't data between spec.start and the requested start datetime
-                # Fill whit np.nan values and update spec attributes
-                nan_data = missing_nan_data(start, spec.start, len(spec.freq_axis), int(1 / step))
-                spec.data = np.concatenate((nan_data, spec.data), axis=1)
-                spec.start = start
-                spec.time_axis = np.arange(
-                    start=0.0, stop=len(spec.time_axis) + nan_data.shape[-1], step=step
-                )
-
-            if spec.end < end:
-                # There isn't data between spec.end and the requested end datetime
-                # Fill whit np.nan values and update spec attributes
-                nan_data = missing_nan_data(spec.end, end, len(spec.freq_axis), int(1 / step))
-                spec.data = np.concatenate((spec.data, nan_data), axis=1)
-                spec.end = end
-                spec.time_axis = np.arange(
-                    start=0.0, stop=len(spec.time_axis) + nan_data.shape[-1], step=step
-                )
-
-            if update_start:
-                start_difference = (start - spec.start).total_seconds()
-                from_start = int(start_difference * 1 / step)
-                spec.data = spec.data[:, from_start:]
-                spec.start = start
-
             if exact:
-                spec.start = start
-                spec.end = end
+                spec.start = spec.start.replace(microsecond=0)
+                spec.end = spec.end.replace(microsecond=0)
 
+                if spec.start > start or spec.end < end:
+                    step = spec.time_axis[1]
+
+                if spec.start > start:
+                    # There isn't data between spec.start and the requested start datetime
+                    # Fill whit np.nan values and update spec attributes
+                    nan_data = missing_nan_data(start, spec.start, len(spec.freq_axis), int(1 / step))
+                    spec.data = np.concatenate((nan_data, spec.data), axis=1)
+                    spec.start = start
+                    spec.time_axis = np.arange(
+                        start=0.0, stop=len(spec.time_axis) + nan_data.shape[-1], step=step
+                    )
+
+                if spec.end < end:
+                    # There isn't data between spec.end and the requested end datetime
+                    # Fill whit np.nan values and update spec attributes
+                    nan_data = missing_nan_data(spec.end, end, len(spec.freq_axis), int(1 / step))
+                    spec.data = np.concatenate((spec.data, nan_data), axis=1)
+                    spec.time_axis = np.arange(
+                        start=0.0, stop=len(spec.time_axis) + nan_data.shape[-1], step=step
+                    )
+
+                step = spec.time_axis[1]
                 start_difference = (start - spec.start).total_seconds()
                 end_difference = (end - start).total_seconds()
-                from_start = int(start_difference * 1 / step)
+                from_start = int((start_difference * 1 / step))
 
                 if distribution > 1:
                     remainder, quotient = math.modf(end_difference / DATA_SIZE.total_seconds())
@@ -579,9 +561,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                         if remainder > 0:
                             end_difference += DATA_SIZE.total_seconds()
 
-                    spec.end = spec.start + datetime.timedelta(seconds=end_difference)
-
-                to_end = int(from_start + end_difference * 1 / step)
+                to_end = int((from_start + end_difference * 1 / step))
 
                 spec.time_axis = spec.time_axis[from_start: to_end]
                 spec.data = spec.data[:, from_start: to_end]
