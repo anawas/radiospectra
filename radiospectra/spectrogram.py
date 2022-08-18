@@ -10,13 +10,13 @@ from distutils.version import LooseVersion
 from typing import Union, List
 import matplotlib
 import numpy as np
-from skimage import filters
+from skimage import filters, morphology
 from matplotlib import pyplot as plt
 from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter, IndexLocator, MaxNLocator
 from numpy import ma
-from scipy import ndimage
+from scipy import ndimage, signal
 from sortedcontainers import SortedList
 import ruptures as rpt
 
@@ -383,6 +383,30 @@ class Spectrogram(Parent):
         new = copy(self)
         new.data = data
         return new
+
+    def __apply_tophat__(self, data, disk):
+        footprint = morphology.disk(disk)
+        result = morphology.white_tophat(data, footprint)
+        return data - result
+
+    def __mask_data__(self, data):
+        _mask = np.ma.masked_where(data == 0, data)
+        original_masked = np.ma.array(self.data, mask=_mask.mask)
+        return np.ma.filled(original_masked.astype(float), 0)
+
+    def __find_peaks__(self, pdata):
+        data = np.copy(pdata)
+        for i in range(data.shape[0]):
+            data[i, :] = data[i, :] - data[i, :].mean()
+
+        datap = np.nan_to_num(data)
+        # datap[datap < 0] = 0
+        p = np.percentile(datap, 70, axis=0) - np.percentile(datap, 20, axis=0)
+        # p = np.max(datap, axis=0)
+        p = p - p.min()
+        peaks, properties = signal.find_peaks(p, distance=100)
+
+        return p, peaks, p[peaks]
 
     def __init__(self, data, time_axis, freq_axis, start, end, t_init=None,
                  t_label="Time", f_label="Frequency", content="",
@@ -1304,6 +1328,61 @@ class Spectrogram(Parent):
             return '{!s} z={!s}'.format(fmt_coord(x, y), pixel)
 
         return format_coord
+
+    def denoise(self, disk=3, full=False):
+        spec = copy(self)
+        data = np.array(spec.data)
+        data[data < 0] = 0
+        data = self.__apply_tophat__(data, disk)
+        spec.data = self.__mask_data__(data)
+
+        """
+        if full:
+            p, peaks, values = self.__find_peaks__(t3)
+
+            more = False
+            if len(peaks) >= 4:
+                max_peak_pos = np.argmax(values)
+
+                l, r = peaks[max_peak_pos - 1], peaks[max_peak_pos + 1]
+
+                p[:l] = 0
+                p[r:] = 0
+
+                if p.max() == 0:
+                    t3 = data.copy()
+                    t3 = apply_tophat(t3, disk=3)
+                    p, peaks, values = toSignal(t3, tophat=False)
+
+                    max_peak_pos = np.argmax(values)
+
+                    l, r = peaks[max_peak_pos - 1], peaks[max_peak_pos + 1]
+
+                    p[:l] = 0
+                    p[r:] = 0
+
+            # Clean more the image on t3
+            if len(peaks) >= 4:
+                max_peak_pos = np.argmax(p[peaks])
+                l, r = peaks[max_peak_pos - 1], peaks[max_peak_pos + 1]
+
+                ndata = t3.copy()
+                ndata[:, :l] = 0
+                ndata[:, r:] = 0
+
+                ndata_mask = np.ma.masked_where(ndata == 0, ndata)
+                original_masked = np.ma.array(data, mask=ndata_mask.mask)
+                original_masked = np.ma.filled(original_masked.astype(float), 0)
+                more = True
+
+            if more:
+                data = original_masked
+            else:
+                data = t3
+
+        """
+
+        return spec
 
 
 class LinearTimeSpectrogram(Spectrogram):
