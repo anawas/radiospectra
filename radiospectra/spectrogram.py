@@ -385,26 +385,63 @@ class Spectrogram(Parent):
         return new
 
     def __apply_tophat__(self, data, disk):
+        """
+        Apply a morphological tophat transformation on the data
+
+        Parameters
+        ----------
+        data : Numpy array.
+            spec data transform into a numpy array
+        disk : float
+            Size of the disk for the morphology transformation
+        """
         footprint = morphology.disk(disk)
         result = morphology.white_tophat(data, footprint)
         return data - result
 
     def __mask_data__(self, data):
+        """
+        Apply a mask to the spec data himself. The mask correspond to that values where the parameter
+        data is equal to 0. The final result is the spec.data = spec.data ∩ data
+
+        Parameters
+        ----------
+        data : Numpy array.
+            data that will take it for get the mask
+        """
+
         _mask = np.ma.masked_where(data == 0, data)
         original_masked = np.ma.array(self.data, mask=_mask.mask)
         return np.ma.filled(original_masked.astype(float), 0)
 
-    def __find_peaks__(self, pdata):
+    def __find_peaks__(self, pdata, pmax=70, pmin=20, distance=100):
+        """
+        Apply an algebra procedure for find the highest peaks values in the data using percentile function
+
+        Parameters
+        ----------
+        pdata : Numpy array.
+            A copy of spec.data
+        pmax : int.
+            Max percentile
+        pmin : int.
+            Min percentile
+        distance : int.
+            Distance between the peaks
+
+        Return
+        ----------
+        tuple
+        """
+
         data = np.copy(pdata)
         for i in range(data.shape[0]):
             data[i, :] = data[i, :] - data[i, :].mean()
 
         datap = np.nan_to_num(data)
-        # datap[datap < 0] = 0
-        p = np.percentile(datap, 70, axis=0) - np.percentile(datap, 20, axis=0)
-        # p = np.max(datap, axis=0)
+        p = np.percentile(datap, pmax, axis=0) - np.percentile(datap, pmin, axis=0)
         p = p - p.min()
-        peaks, properties = signal.find_peaks(p, distance=100)
+        peaks, properties = signal.find_peaks(p, distance=distance)
 
         return p, peaks, p[peaks]
 
@@ -1330,58 +1367,54 @@ class Spectrogram(Parent):
         return format_coord
 
     def denoise(self, disk=3, full=False):
+        """
+        Denoise the data after apply bg_substraction and eliminwrongchannels.
+
+        Parameters
+        ----------
+        disk : float.
+            Size of the disk for the morphology transformation.
+        full : bool.
+            If apply more denoise after the morphological transformation.
+
+        Return
+        ----------
+        object
+        """
+
         spec = copy(self)
         data = np.array(spec.data)
         data[data < 0] = 0
         data = self.__apply_tophat__(data, disk)
-        spec.data = self.__mask_data__(data)
 
-        """
         if full:
-            p, peaks, values = self.__find_peaks__(t3)
+            auxdata = data.copy()
+            p, peaks, values = self.__find_peaks__(auxdata)
 
-            more = False
             if len(peaks) >= 4:
                 max_peak_pos = np.argmax(values)
-
                 l, r = peaks[max_peak_pos - 1], peaks[max_peak_pos + 1]
-
                 p[:l] = 0
                 p[r:] = 0
 
                 if p.max() == 0:
-                    t3 = data.copy()
-                    t3 = apply_tophat(t3, disk=3)
-                    p, peaks, values = toSignal(t3, tophat=False)
-
+                    auxdata = self.__apply_tophat__(auxdata, disk=disk)
+                    p, peaks, values = self.__find_peaks__(auxdata)
                     max_peak_pos = np.argmax(values)
-
                     l, r = peaks[max_peak_pos - 1], peaks[max_peak_pos + 1]
-
                     p[:l] = 0
                     p[r:] = 0
 
-            # Clean more the image on t3
-            if len(peaks) >= 4:
-                max_peak_pos = np.argmax(p[peaks])
-                l, r = peaks[max_peak_pos - 1], peaks[max_peak_pos + 1]
+                # Clean more the image on t3
+                if len(peaks) >= 4:
+                    max_peak_pos = np.argmax(p[peaks])
+                    l, r = peaks[max_peak_pos - 1], peaks[max_peak_pos + 1]
 
-                ndata = t3.copy()
-                ndata[:, :l] = 0
-                ndata[:, r:] = 0
+                auxdata[:, :l] = 0
+                auxdata[:, r:] = 0
+                data = auxdata
 
-                ndata_mask = np.ma.masked_where(ndata == 0, ndata)
-                original_masked = np.ma.array(data, mask=ndata_mask.mask)
-                original_masked = np.ma.filled(original_masked.astype(float), 0)
-                more = True
-
-            if more:
-                data = original_masked
-            else:
-                data = t3
-
-        """
-
+        spec.data = self.__mask_data__(data)
         return spec
 
 

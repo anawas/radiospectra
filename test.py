@@ -7,7 +7,7 @@ if __name__ == '__main__':
     # ).elimwrongchannels().subtract_bg().denoise()
     spec = CallistoSpectrogram.read(
         'Z:\\radio\\2002-20yy_Callisto\\2020\\11\\12\\ALASKA-HAARP_20201112_184503_01.fit.gz'
-    ).elimwrongchannels().subtract_bg().denoise()
+    ).elimwrongchannels().subtract_bg().denoise(full=True)
     spec.peek()
 
 
