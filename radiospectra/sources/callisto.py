@@ -378,11 +378,12 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             axes_header = axes.header
 
         fl.close()
-        return cls(
+        spec = cls(
             data, time_axis, freq_axis, start, end, t_init, t_delt,
             t_label, f_label, content, instruments,
             header, axes_header, swapped, filename
         )
+        return spec
 
     def __init__(self, data, time_axis, freq_axis, start, end,
                  t_init=None, t_delt=None, t_label="Time", f_label="Frequency",
@@ -525,12 +526,16 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         for elem in data:
             freq_buckets[tuple(elem.freq_axis)].append(elem)
         try:
+            # here the header is not copied
             spec = cls.combine_frequencies(
                 [cls.new_join_many(elem) for elem in freq_buckets.values()]
             )
 
+            # which we do now. We must adjust the parameters later
+            spec.header = data[0].header.copy()
             spec.start = spec.start.replace(microsecond=0)
             spec.end = spec.end.replace(microsecond=0)
+            
 
             if update_start or exact or spec.start > start or spec.end < end:
                 step = spec.time_axis[1]
@@ -562,9 +567,6 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 spec.start = start
 
             if exact:
-                spec.start = start
-                spec.end = end
-
                 start_difference = (start - spec.start).total_seconds()
                 end_difference = (end - start).total_seconds()
                 from_start = int(start_difference * 1 / step)
@@ -585,6 +587,14 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
 
                 spec.time_axis = spec.time_axis[from_start: to_end]
                 spec.data = spec.data[:, from_start: to_end]
+                
+                # The time range of the spectrogram has changed. We need to
+                # update the header...
+                spec.header['TIME-OBS'] = spec.start.strftime("%H:%M:%S")
+                spec.header['TIME-END'] = spec.end.strftime("%H:%M:%S")
+                # ...and the time range
+                second_of_day = spec.start.hour * 3600 + spec.start.minute * 60 + spec.start.second
+                spec.t_init = second_of_day
 
             return spec
 

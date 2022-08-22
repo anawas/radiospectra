@@ -1595,8 +1595,8 @@ class LinearTimeSpectrogram(Spectrogram):
 
         specs = cls.intersect_time(specs)
 
-        one = specs[0]
 
+        one = specs[0]
         dtype_ = max(sp.dtype for sp in specs)
         fsize = sum(sp.shape[0] for sp in specs)
 
