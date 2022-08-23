@@ -535,7 +535,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             spec.header = data[0].header.copy()
             spec.start = spec.start.replace(microsecond=0)
             spec.end = spec.end.replace(microsecond=0)
-            
+            spec.axes_header = data[1].header.copy()
 
             if update_start or exact or spec.start > start or spec.end < end:
                 step = spec.time_axis[1]
@@ -590,8 +590,9 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
                 
                 # The time range of the spectrogram has changed. We need to
                 # update the header...
-                spec.header['TIME-OBS'] = spec.start.strftime("%H:%M:%S")
-                spec.header['TIME-END'] = spec.end.strftime("%H:%M:%S")
+                cls.adjust_header(spec, time_obs=spec.start.strftime("%H:%M:%S"), time_end=spec.end.strftime("%H:%M:%S"))
+                #spec.header['TIME-OBS'] = spec.start.strftime("%H:%M:%S")
+                #spec.header['TIME-END'] = spec.end.strftime("%H:%M:%S")
                 # ...and the time range
                 second_of_day = spec.start.hour * 3600 + spec.start.minute * 60 + spec.start.second
                 spec.t_init = second_of_day
