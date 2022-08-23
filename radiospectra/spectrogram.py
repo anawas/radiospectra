@@ -7,6 +7,7 @@ from copy import copy
 from math import floor
 from random import randint
 from distutils.version import LooseVersion
+from re import sub
 from typing import Union, List
 import matplotlib
 import numpy as np
@@ -1568,13 +1569,25 @@ class LinearTimeSpectrogram(Spectrogram):
         specs : list
             List of spectrograms of which to find the time intersections.
         """
-        delt = min(sp.t_delt for sp in specs)
-        start = max(sp.t_init for sp in specs)
+        flat_list = list()
+        for item in specs:
+            if  isinstance(item, list):
+                for subitem in item:
+                    flat_list.append(subitem)
+            else:
+                flat_list.append(item)
 
+        # print(type(specs))
+        delt = min(sp.t_delt for sp in flat_list)
+        start = max(sp.t_init for sp in flat_list)
+            
         # XXX: Could do without resampling by using
         # sp.t_init below, not sure if good idea.
-        specs = [sp.resample_time(delt) for sp in specs]
-        cut = [sp[:, int((start - sp.t_init) / delt):] for sp in specs]
+        specs_resamp = [sp.resample_time(delt) for sp in flat_list]
+        for sp in specs_resamp:
+            print(sp[:, int((start - sp.t_init) / delt):])
+        
+        cut = [sp[:, int((start - sp.t_init) / delt):] for sp in specs_resamp]
 
         length = min(sp.shape[1] for sp in cut)
         return [sp[:, :length] for sp in cut]
