@@ -1640,6 +1640,8 @@ class LinearTimeSpectrogram(Spectrogram):
             'f_label': data.f_label,
             'content': data.content,
             'instruments': _union(spec.instruments for spec in specs),
+            'header': data.get_header(),
+            'axes_header': data.axes_header
         }
         if mask is not None:
             arr = ma.array(arr, mask=mask)
@@ -1747,8 +1749,11 @@ class LinearTimeSpectrogram(Spectrogram):
             't_label': one.t_label,
             'f_label': one.f_label,
             'content': one.content,
-            'instruments': _union(spec.instruments for spec in specs)
+            'instruments': _union(spec.instruments for spec in specs),
+            'header': one.get_header(),
+            'axes_header': one.axes_header
         }
+
         return common_base(specs)(new, **params)
 
     def check_linearity(self, err=None, err_factor=None):
