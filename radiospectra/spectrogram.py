@@ -342,6 +342,12 @@ class Spectrogram(Parent):
     def dtype(self):
         return self.data.dtype
 
+    @property
+    def noise(self):
+        arr = np.absolute(np.asanyarray(self.data))
+        std = round(np.nanstd(arr), 3)
+        return round(np.nanmean(arr) / std, 3)
+
     def _get_params(self):
         """
         Implementation detail.
