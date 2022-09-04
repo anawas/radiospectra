@@ -17,19 +17,13 @@ def load_and_display(filename):
 def prettify(spec):
     return spec.elimwrongchannels().subtract_bg().denoise(full=True)
 
+base_dir = "/Volumes/Daten/bursts"
+filename = "/Volumes/Daten/combined.fit.gz"
+filename = f"{base_dir}/AUSTRIA-OE3FLB_20220901_093003_57.fit.gz"
+spec = CallistoSpectrogram.read(filename)
+s = spec.in_interval("09:35", "09:45")
+print(s.header.tostring(sep="\n"))
+s.save(f"{base_dir}/test.fit.gz")
 
-start = datetime.datetime(2022, 8, 15, 14, 32)
-end = datetime.datetime(2022, 8, 15, 14, 36)
-spec = CallistoSpectrogram.from_range("SWISS-Landschlacht", start.isoformat(), end.isoformat(), exact=True)
-# spec = CallistoSpectrogram.from_url("http://soleil.i4ds.ch/solarradio/data/2002-20yy_Callisto/2022/08/15/SWISS-Landschlacht_20220815_143000_62.fit.gz")
-# inter = spec.in_interval(start, end)
-pretty = prettify(spec)
-mean = pretty.data.mean()
-fig = plt.figure(figsize=(6,4))
-pretty.plot(fig, vmin=-5*mean, vmax=10*mean)
-plt.show()
-plt.close(fig)
-
-save(pretty, "pretty.fit.gz")
-#load_and_display("nocorrections.fit.gz")
-load_and_display("pretty.fit.gz")
+test = CallistoSpectrogram.read(f"{base_dir}/test.fit.gz")
+test.peek()

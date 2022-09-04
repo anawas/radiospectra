@@ -226,3 +226,5 @@ radiospectra/_version.py
 .history
 *.orig
 .tmp
+*.fit.gz
+
