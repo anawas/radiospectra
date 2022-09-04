@@ -372,19 +372,29 @@ class Spectrogram(Parent):
         eoffset -= 1
         eoffset = int(eoffset)
 
+        # adjust the start and end time of the spectrogram in order to match
+        # the time boundaries of the slice
+        new_start_time = self.start + datetime.timedelta(
+                seconds=self.time_axis[soffset])
+        new_end_time = self.start + datetime.timedelta(
+                seconds=self.time_axis[eoffset])
+
         params.update({
             'time_axis': self.time_axis[
                          x_range.start:x_range.stop:x_range.step
                          ] - self.time_axis[soffset],
             'freq_axis': self.freq_axis[
                          y_range.start:y_range.stop:y_range.step],
-            'start': self.start + datetime.timedelta(
-                seconds=self.time_axis[soffset]),
-            'end': self.start + datetime.timedelta(
-                seconds=self.time_axis[eoffset]),
+            'start': new_start_time,
+            'end': new_end_time,
             't_init': self.t_init + self.time_axis[soffset],
+            'header': self.header.copy()
         })
-        return self.__class__(data, **params)
+        new_spec = self.__class__(data, **params)
+
+        # must not forget to update the header. This is important if we want to write a FITS.
+        new_spec.adjust_header(time_obs=new_start_time.strftime("%H:%M:%S"), time_end=new_end_time.strftime("%H:%M:%S"))
+        return new_spec
 
     def _with_data(self, data):
         new = copy(self)
