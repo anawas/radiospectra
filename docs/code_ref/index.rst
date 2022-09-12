@@ -1,8 +1,8 @@
 .. _reference:
 
-===
-API
-===
+==============
+Code Reference
+==============
 
 .. toctree::
    :maxdepth: 2
