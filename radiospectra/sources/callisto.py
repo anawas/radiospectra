@@ -164,7 +164,7 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
     ARRAY_TYPE = np.float_
     MISSING_VALUE = np.nan
 
-    def save(self, filepath=None):
+    def save(self, filepath=None, overwrite=False):
         """
         Save modified spectrogram back to filepath.
 
@@ -172,6 +172,9 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         ----------
         filepath : str
             path to save the spectrogram to
+        overwrite : bool
+             if true, a file with the same name like path is overwritten
+             False is the original behaviour
         """
 
         if filepath is None:
@@ -185,7 +188,10 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
         data.header.append(card=('BSCALE', 1, 'scaling factor'))
         data.header['NAXIS1'] = (data.header['NAXIS1'], 'length of data axis 1')
         data.header['NAXIS2'] = (data.header['NAXIS2'], 'length of data axis 2')
-
+        # These cards are not copied to new spectrogram. Let's set it to 0 for now 
+        # (added by Andreas Wassmer)
+        data.header['DATAMIN'] = 0
+        data.header['DATAMAX'] = 0
         freq_col = fits.Column(
             name="FREQUENCY",
             format=f"{len(self.freq_axis)}D8.3",
@@ -224,8 +230,8 @@ class CallistoSpectrogram(LinearTimeSpectrogram):
             rfi_table = fits.BinTableHDU.from_columns(rfi_freq_col, header=self.axes_header, name='RFI_FREQ')
             hdulist.insert(2, rfi_table)
 
-        if not os.path.exists(filepath):
-            hdulist.writeto(filepath)
+        if not os.path.exists(filepath) or overwrite:
+            hdulist.writeto(filepath, overwrite=True)
             return filepath
         else:
             i = 0
