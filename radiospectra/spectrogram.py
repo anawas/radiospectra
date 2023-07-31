@@ -394,6 +394,7 @@ class Spectrogram(Parent):
 
         # must not forget to update the header. This is important if we want to write a FITS.
         new_spec.adjust_header(time_obs=new_start_time.strftime("%H:%M:%S"), time_end=new_end_time.strftime("%H:%M:%S"))
+
         return new_spec
 
     def _with_data(self, data):
@@ -1850,4 +1851,5 @@ class LinearTimeSpectrogram(Spectrogram):
             start = int(start)
         if end:
             end = int(end)
-        return self[:, start:end]
+        # this calls magic function __getitem__
+        return self[:, start:end] 
